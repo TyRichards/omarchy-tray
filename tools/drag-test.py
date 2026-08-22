@@ -64,20 +64,39 @@ def main():
         time.sleep(0.05)
     time.sleep(0.4)
     cmd("release")
-    time.sleep(0.5)
-    vp.stdin.close()
-    vp.wait(timeout=5)
-
     time.sleep(1)
+
+    captured = None
     config = json.load(open(pathlib.Path.home() / ".config/omarchy/shell.json"))
     for section in config["bar"]["layout"].values():
         for entry in section:
             if isinstance(entry, dict) and entry.get("id") == TRAY_ID:
                 hosted = [w for w in entry.get("widgets", []) if w.get("entry", {}).get("id") == SOURCE]
                 if hosted:
-                    print("PASS: captured", json.dumps(hosted[0]))
-                    return
-    sys.exit(f"FAIL: {SOURCE} not found in the tray's widgets list")
+                    captured = hosted[0]
+    if not captured:
+        vp.stdin.close()
+        vp.wait(timeout=5)
+        sys.exit(f"FAIL: {SOURCE} not found in the tray's widgets list")
+    print("PASS: captured", json.dumps(captured))
+
+    # Render check: hover the chevron; the drawer must physically expand,
+    # proving the captured widget instantiates with nonzero width (the
+    # "black hole" regression, where capture worked but nothing rendered).
+    time.sleep(1)
+    tray = geometry()[TRAY_ID]
+    cmd(f"abs {tray['x'] + tray['width'] - 8:.0f} {bar_y:.0f} {ext_w} {ext_h}")
+    time.sleep(0.15)
+    cmd("move -2 1")
+    time.sleep(1.3)
+    expanded = geometry()[TRAY_ID]["width"]
+    cmd(f"abs 705 485 {ext_w} {ext_h}")
+    time.sleep(0.2)
+    vp.stdin.close()
+    vp.wait(timeout=5)
+    if expanded <= tray["width"]:
+        sys.exit(f"FAIL: drawer did not expand on hover ({tray['width']} -> {expanded}); captured widget renders empty")
+    print(f"PASS: drawer expands and renders ({tray['width']} -> {expanded})")
 
 
 if __name__ == "__main__":

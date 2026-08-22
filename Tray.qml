@@ -26,8 +26,8 @@ BarWidget {
   property var activeTrayAnchor: null
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property var pinnedIds: settings.pinned instanceof Array ? settings.pinned : []
-  readonly property var hiddenIds: settings.hidden instanceof Array ? settings.hidden : []
+  readonly property var pinnedIds: TrayModel.asList(settings.pinned).map(String)
+  readonly property var hiddenIds: TrayModel.asList(settings.hidden).map(String)
   readonly property var pinnedItems: bucket("pinned")
   readonly property var drawerItems: bucket("drawer")
   readonly property var allItems: bucket("all")
@@ -38,7 +38,7 @@ BarWidget {
   // (always visible, outside the drawer). Stored on this widget's own
   // shell.json entry so they survive restarts and sync across monitors.
   readonly property var hostedWrappers: TrayModel.normalizeWrappers(settings.widgets)
-  readonly property var pinnedWidgetIds: settings.pinnedWidgets instanceof Array ? settings.pinnedWidgets : []
+  readonly property var pinnedWidgetIds: TrayModel.asList(settings.pinnedWidgets).map(String)
   readonly property var hostedPinned: hostedWrappers.filter(function(wrapper) {
     return root.pinnedWidgetIds.indexOf(TrayModel.wrapperId(wrapper)) !== -1
   })

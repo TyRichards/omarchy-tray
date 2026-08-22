@@ -49,13 +49,27 @@ function ownedByOmarchy(item, layout) {
     || (layoutHasWidget(layout, "omarchy.dropbox") && itemNamed(item, "dropbox"))
 }
 
+// QML can hand a settings array across property boundaries as a variant-list
+// proxy: typeof "object", instanceof Array, but Array.isArray false and array
+// methods missing. Which form arrives depends on the injection path, so every
+// settings-derived list must be copied into a real array before use.
+function asList(value) {
+  if (Array.isArray(value)) return value
+  if (value && typeof value === "object" && typeof value.length === "number") {
+    var out = []
+    for (var i = 0; i < value.length; i++) out.push(value[i])
+    return out
+  }
+  return []
+}
+
 // The `widgets` setting holds one wrapper per captured bar widget:
 //   { entry: <original layout entry>, from: <section it came from> }
 // Tolerate hand-edited shorthand (a bare id string, or a bare entry object)
 // so a typo'd shell.json degrades to defaults instead of a dead tray.
 function normalizeWrappers(raw) {
   var out = []
-  var values = Array.isArray(raw) ? raw : []
+  var values = asList(raw)
   for (var i = 0; i < values.length; i++) {
     var wrapper = values[i]
     if (!wrapper) continue
@@ -169,6 +183,7 @@ function restoreFromTray(config, trayId, widgetId) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    asList: asList,
     itemNamed: itemNamed,
     entryId: entryId,
     entrySettings: entrySettings,
