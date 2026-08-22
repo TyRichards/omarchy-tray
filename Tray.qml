@@ -210,6 +210,55 @@ BarWidget {
     hostedDelegates = hostedDelegates.filter(function(d) { return d !== item })
   }
 
+  // While a hosted widget is dragged over the tray, resolve the pointer to
+  // the nearest insertion edge among the OTHER hosted widgets (same math as
+  // the bar's nearestDropTarget). Returns {delegate, after, beforeId} where
+  // beforeId is the wrapper id to insert before ("" = move to the end), or
+  // null when there is nothing to reorder against.
+  function hostedReorderPick(scenePoint, dragged) {
+    var axis = root.vertical ? scenePoint.y : scenePoint.x
+    var bestDelegate = null
+    var bestAfter = false
+    var bestDist = Infinity
+    for (var i = 0; i < hostedDelegates.length; i++) {
+      var d = hostedDelegates[i]
+      if (!d || d === dragged || !d.visible || d.width <= 0 || d.height <= 0) continue
+      var origin
+      try {
+        origin = d.mapToItem(null, 0, 0)
+      } catch (e) {
+        continue
+      }
+      var start = root.vertical ? origin.y : origin.x
+      var size = root.vertical ? d.height : d.width
+      var beforeDist = Math.abs(axis - start)
+      var afterDist = Math.abs(axis - (start + size))
+      var after = afterDist < beforeDist
+      var dist = after ? afterDist : beforeDist
+      if (dist < bestDist) {
+        bestDist = dist
+        bestDelegate = d
+        bestAfter = after
+      }
+    }
+    if (!bestDelegate) return null
+
+    var draggedId = dragged ? String(dragged.widgetId || "") : ""
+    var ids = hostedWrappers.map(TrayModel.wrapperId)
+    var targetIndex = ids.indexOf(String(bestDelegate.widgetId || ""))
+    if (targetIndex === -1) return null
+    var beforeId
+    if (!bestAfter) {
+      beforeId = ids[targetIndex]
+    } else {
+      beforeId = ""
+      for (var j = targetIndex + 1; j < ids.length; j++) {
+        if (ids[j] !== draggedId) { beforeId = ids[j]; break }
+      }
+    }
+    return { delegate: bestDelegate, after: bestAfter, beforeId: beforeId }
+  }
+
   function hostedDelegateAt(rootX, rootY) {
     for (var i = 0; i < hostedDelegates.length; i++) {
       var d = hostedDelegates[i]
@@ -277,6 +326,9 @@ BarWidget {
       property real pressedX: 0
       property real pressedY: 0
       property var dragDelegate: null
+      // Wrapper id to insert before when released over the tray ("" = end);
+      // null while the pointer is off the tray or nothing can be reordered.
+      property var reorderBeforeId: null
       readonly property bool canReorder: root.bar && root.bar.shell
         && typeof root.bar.shell.mutateShellConfig === "function"
       readonly property real dragThreshold: Style.space(4)
@@ -315,16 +367,20 @@ BarWidget {
         b.barDragScreenX = screenPoint.x
         b.barDragScreenY = screenPoint.y
 
-        // Over the tray itself, suppress the insertion marker: releasing here
-        // keeps the widget in the tray (the tray's own drop highlight shows).
+        // Over the tray itself the release reorders instead of dropping out:
+        // clear the bar-level drop target and mark the in-tray insertion
+        // edge, reusing the bar's marker rendering for the visual.
         var p = rootPoint(mouse)
         var overTray = p.x >= 0 && p.x <= root.width && p.y >= 0 && p.y <= root.height
         if (overTray) {
           b.barDragTarget = null
           b.barDragAfter = false
-          b.barDragTargetGeometry = null
+          var pick = root.hostedReorderPick(scenePoint, dragDelegate)
+          reorderBeforeId = pick ? pick.beforeId : null
+          b.barDragTargetGeometry = pick ? b.dropMarkerRect(pick.delegate, pick.after) : null
           return
         }
+        reorderBeforeId = null
         var drop = b.moduleDropAtScene(scenePoint, fakeDragSlot)
         b.barDragTarget = drop ? drop.slot : null
         b.barDragAfter = drop ? drop.after : false
@@ -369,6 +425,8 @@ BarWidget {
         var target = b ? b.barDragTarget : null
         var after = b ? b.barDragAfter : false
         var widgetId = fakeDragSlot.moduleName
+        var reorder = reorderBeforeId
+        reorderBeforeId = null
         var toRegion = target ? String(target.region || "") : ""
         var beforeName = ""
         if (target && b) {
@@ -381,23 +439,34 @@ BarWidget {
         fakeDragSlot.moduleName = ""
         mouse.accepted = true
 
-        if (!target || !toRegion || !widgetId || !b || !b.shell) return
+        if (!widgetId || !b || !b.shell) return
         var shellRef = b.shell
         var trayId = root.moduleName || "io.github.tyrichards.tray"
         // Deferred for the same reason as drag-in: a synchronous write would
         // rebuild the bar while this release handler is on the stack. The
         // closure holds only the shell reference and plain values.
-        Qt.callLater(function() {
-          if (typeof shellRef.mutateShellConfig !== "function") return
-          shellRef.mutateShellConfig(function(config) {
-            TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
+        if (target && toRegion) {
+          Qt.callLater(function() {
+            if (typeof shellRef.mutateShellConfig !== "function") return
+            shellRef.mutateShellConfig(function(config) {
+              TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
+            })
           })
-        })
+        } else if (reorder !== null && reorder !== undefined) {
+          // Released over the tray: reorder within the drawer instead.
+          Qt.callLater(function() {
+            if (typeof shellRef.mutateShellConfig !== "function") return
+            shellRef.mutateShellConfig(function(config) {
+              TrayModel.reorderInTray(config, trayId, widgetId, String(reorder))
+            })
+          })
+        }
       }
 
       onCanceled: {
         dragging = false
         suppressClick = false
+        reorderBeforeId = null
         if (root.bar && root.bar.barDragSource === fakeDragSlot) root.bar.clearBarDrag()
         fakeDragSlot.activeItem = null
         fakeDragSlot.moduleName = ""

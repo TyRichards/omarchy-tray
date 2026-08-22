@@ -248,6 +248,37 @@ function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
   return true
 }
 
+// Mutates `config` in place: move `widgetId`'s wrapper within the tray's
+// widgets list so it sits before `beforeId` (empty string = move to the end).
+// Returns true when the order actually changed.
+function reorderInTray(config, trayId, widgetId, beforeId) {
+  var layout = config && config.bar ? config.bar.layout : null
+  if (!layout) return false
+  var tray = findLayoutEntry(layout, trayId)
+  if (!tray || typeof tray.entry === "string") return false
+  var wrappers = Array.isArray(tray.entry.widgets) ? tray.entry.widgets : []
+
+  var from = -1
+  for (var i = 0; i < wrappers.length; i++) {
+    if (wrapperId(wrappers[i]) === widgetId) { from = i; break }
+  }
+  if (from === -1) return false
+
+  var wrapper = wrappers.splice(from, 1)[0]
+  var to = wrappers.length
+  if (beforeId) {
+    for (var j = 0; j < wrappers.length; j++) {
+      if (wrapperId(wrappers[j]) === String(beforeId)) { to = j; break }
+    }
+  }
+  if (to === from) {
+    wrappers.splice(from, 0, wrapper)
+    return false
+  }
+  wrappers.splice(to, 0, wrapper)
+  return true
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
@@ -263,6 +294,7 @@ if (typeof module !== "undefined") {
     findLayoutEntry: findLayoutEntry,
     captureIntoTray: captureIntoTray,
     restoreFromTray: restoreFromTray,
-    dragOutOfTray: dragOutOfTray
+    dragOutOfTray: dragOutOfTray,
+    reorderInTray: reorderInTray
   }
 }
