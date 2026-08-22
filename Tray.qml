@@ -893,41 +893,45 @@ BarWidget {
       anchors.fill: parent
       spacing: Style.space(8)
 
+      Text {
+        text: "Tray"
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+
+      PanelSectionHeader {
+        text: "HIDE AND ORGANIZE YOUR ICONS"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+      }
+
       Item {
         width: manageColumn.width
-        implicitHeight: Math.max(showIconsLabel.implicitHeight, showIconsSwitch.implicitHeight)
+        implicitHeight: Math.max(hideIconsLabel.implicitHeight, hideIconsSwitch.implicitHeight)
 
         Text {
-          id: showIconsLabel
+          id: hideIconsLabel
           anchors.verticalCenter: parent.verticalCenter
           anchors.left: parent.left
-          anchors.right: showIconsSwitch.left
+          anchors.right: hideIconsSwitch.left
           anchors.rightMargin: Style.space(10)
-          text: "Show System Tray Icons"
+          text: "Hide System Tray Icons"
           color: root.foreground
           font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
+          font.pixelSize: Style.font.bodySmall
           elide: Text.ElideRight
         }
 
         ToggleSwitch {
-          id: showIconsSwitch
+          id: hideIconsSwitch
           anchors.verticalCenter: parent.verticalCenter
           anchors.right: parent.right
-          checked: root.showTrayIcons
+          checked: !root.showTrayIcons
           foreground: root.foreground
           onToggled: root.persistState({ showTrayIcons: !root.showTrayIcons })
         }
-      }
-
-      Text {
-        visible: root.allItems.length > 0
-        text: "System Tray Icons"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        font.bold: true
       }
 
       Text {
@@ -947,6 +951,9 @@ BarWidget {
           required property int index
           width: manageColumn.width
           implicitHeight: 28
+          // Grayed out (and inert) while the master hide switch is on.
+          opacity: root.showTrayIcons ? 1.0 : 0.4
+          enabled: root.showTrayIcons
 
           readonly property string itemId: String(modelData.id || "")
           readonly property string displayName: {
