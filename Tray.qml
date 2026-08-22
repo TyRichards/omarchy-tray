@@ -907,6 +907,10 @@ BarWidget {
         fontFamily: root.fontFamily
       }
 
+      PanelSeparator {
+        foreground: root.foreground
+      }
+
       Item {
         width: manageColumn.width
         implicitHeight: Math.max(hideIconsLabel.implicitHeight, hideIconsSwitch.implicitHeight)
