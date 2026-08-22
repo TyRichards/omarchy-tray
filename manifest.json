@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.tyrichards.tray",
+  "name": "Tray",
+  "version": "1.0.0",
+  "author": "Ty Richards",
+  "license": "MIT",
+  "description": "A better system tray: everything the stock tray does, plus drag any bar widget into its slide-out drawer.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Tray.qml"
+  },
+  "barWidget": {
+    "displayName": "Tray",
+    "description": "Status notifier items, plus any bar widgets you drop into it",
+    "category": "Status",
+    "aliases": ["tray", "supertray"],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
