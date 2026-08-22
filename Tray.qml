@@ -62,19 +62,25 @@ BarWidget {
   // when it is released here, capture the widget into the drawer.
   // ---------------------------------------------------------------------------
 
-  readonly property bool dragActive: {
-    var slot = root.bar ? root.bar.barDragSource : null
-    if (!slot) return false
+  readonly property bool dragActive: root.bar ? dragEligible(root.bar.barDragSource) : false
+  property bool dragOver: false
+  property string dragSourceId: ""
+  property string dragSourceRegion: ""
+  property int dragSourceIndex: -1
+
+  // Imperative on purpose: the drag-start handler runs inside the very signal
+  // dispatch that dirtied the dragActive binding, and reading the binding
+  // there can return a stale false. Recomputing from the live properties is
+  // always current.
+  function dragEligible(slot) {
+    if (!slot || !root.bar) return false
     if (String(slot.moduleName || "") === root.moduleName) return false
     var win = root.QsWindow ? root.QsWindow.window : null
     return !!win && root.bar.barDragWindow === win
   }
-  property bool dragOver: false
-  property string dragSourceId: ""
-  property string dragSourceRegion: ""
 
   function updateDragOver() {
-    if (!dragActive) {
+    if (!dragEligible(root.bar ? root.bar.barDragSource : null)) {
       dragOver = false
       return
     }
@@ -100,34 +106,52 @@ BarWidget {
       if (slot) {
         // Only the instance living in the drag's own bar window can win the
         // drop; every other monitor's copy keeps an empty id and stays inert.
-        root.dragSourceId = root.dragActive ? String(slot.moduleName || "") : ""
+        var eligible = root.dragEligible(slot)
+        root.dragSourceId = eligible ? String(slot.moduleName || "") : ""
         root.dragSourceRegion = String(slot.region || "")
+        // Remember where the widget started so a later Restore can put it
+        // back exactly, even though the bar's own drop may reshuffle it
+        // before the deferred capture runs.
+        root.dragSourceIndex = -1
+        if (eligible && typeof root.bar.layoutEntries === "function") {
+          var entries = root.bar.layoutEntries(root.dragSourceRegion)
+          for (var i = 0; i < entries.length; i++) {
+            if (TrayModel.entryId(entries[i]) === root.dragSourceId) {
+              root.dragSourceIndex = i
+              break
+            }
+          }
+        }
         root.updateDragOver()
         return
       }
-      // The drop. Bar clears barDragSource first thing in its release handler,
-      // before running its own adjacent-slot move, so capturing synchronously
-      // here removes the entry from the layout and the bar's own move finds
-      // nothing to do — one write wins instead of two competing.
+      // The drop. Defer the capture past the bar's own release handling: a
+      // synchronous config write here rebuilds the bar mid-gesture, which
+      // tears down the source slot's context while its release handler is
+      // still on the stack (ReferenceError in Bar.qml, and the release leaks
+      // to whatever sits under the cursor). The closure keeps only the shell
+      // reference and plain values, so it survives this widget's own
+      // destruction in the rebuild that the bar's adjacent-slot move causes.
       var wanted = root.dragOver ? root.dragSourceId : ""
       var from = root.dragSourceRegion
+      var at = root.dragSourceIndex
       root.dragOver = false
       root.dragSourceId = ""
       root.dragSourceRegion = ""
-      if (wanted) root.captureWidget(wanted, from)
+      root.dragSourceIndex = -1
+      if (!wanted) return
+      var shellRef = root.bar ? root.bar.shell : null
+      var trayId = root.moduleName || "io.github.tyrichards.tray"
+      if (!shellRef || typeof shellRef.mutateShellConfig !== "function") return
+      Qt.callLater(function() {
+        shellRef.mutateShellConfig(function(config) {
+          TrayModel.captureIntoTray(config, trayId, wanted, from, at)
+        })
+      })
     }
 
     function onBarDragSceneXChanged() { root.updateDragOver() }
     function onBarDragSceneYChanged() { root.updateDragOver() }
-  }
-
-  function captureWidget(sourceId, fromRegion) {
-    var shell = root.bar ? root.bar.shell : null
-    if (!shell || typeof shell.mutateShellConfig !== "function") return
-    var trayId = root.moduleName || "io.github.tyrichards.tray"
-    shell.mutateShellConfig(function(config) {
-      TrayModel.captureIntoTray(config, trayId, sourceId, fromRegion)
-    })
   }
 
   function restoreWidget(widgetId) {

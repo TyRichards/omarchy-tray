@@ -93,8 +93,11 @@ function findLayoutEntry(layout, id) {
 
 // Mutates `config` in place: pull `sourceId`'s entry out of the bar layout
 // and append it to the tray entry's `widgets` list, remembering the section
-// it came from so a restore can put it back. Returns true when anything moved.
-function captureIntoTray(config, trayId, sourceId, fromRegion) {
+// and index it came from so a restore can put it back. The capture runs
+// deferred, after the bar's own drop may have reshuffled the entry, so the
+// caller passes the section/index observed at drag start; the entry's
+// current position is only a fallback. Returns true when anything moved.
+function captureIntoTray(config, trayId, sourceId, fromRegion, fromIndex) {
   if (!sourceId || sourceId === trayId) return false
   var layout = config && config.bar ? config.bar.layout : null
   if (!layout) return false
@@ -119,7 +122,8 @@ function captureIntoTray(config, trayId, sourceId, fromRegion) {
   if (!Array.isArray(trayEntry.widgets)) trayEntry.widgets = []
   var entry = typeof source.entry === "string" ? { id: source.entry } : source.entry
   var from = SECTIONS.indexOf(fromRegion) !== -1 ? fromRegion : source.section
-  trayEntry.widgets.push({ entry: entry, from: from, at: source.index })
+  var at = typeof fromIndex === "number" && fromIndex >= 0 ? fromIndex : source.index
+  trayEntry.widgets.push({ entry: entry, from: from, at: at })
   return true
 }
 
