@@ -248,6 +248,37 @@ function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
   return true
 }
 
+// Sort status-notifier items by the persisted `iconOrder` id list. Items not
+// in the list keep their arrival order, after every ordered one, so new tray
+// icons appear at the end instead of shuffling the arranged ones.
+function sortByOrder(items, order) {
+  var ord = asList(order).map(String)
+  var decorated = []
+  for (var i = 0; i < items.length; i++) decorated.push({ item: items[i], index: i })
+  decorated.sort(function(a, b) {
+    var ai = ord.indexOf(String(a.item.id || ""))
+    var bi = ord.indexOf(String(b.item.id || ""))
+    var ak = ai === -1 ? ord.length + a.index : ai
+    var bk = bi === -1 ? ord.length + b.index : bi
+    return ak - bk
+  })
+  return decorated.map(function(e) { return e.item })
+}
+
+// Move `id` within an id list so it sits before `beforeId` ("" = end).
+// Returns the new array, or null when the order would not change.
+function movedBefore(order, id, beforeId) {
+  var ids = asList(order).map(String)
+  var from = ids.indexOf(String(id))
+  if (from === -1) return null
+  ids.splice(from, 1)
+  var to = beforeId ? ids.indexOf(String(beforeId)) : ids.length
+  if (to === -1) to = ids.length
+  if (to === from) return null
+  ids.splice(to, 0, String(id))
+  return ids
+}
+
 // Mutates `config` in place: move `widgetId`'s wrapper within the tray's
 // widgets list so it sits before `beforeId` (empty string = move to the end).
 // Returns true when the order actually changed.
@@ -295,6 +326,8 @@ if (typeof module !== "undefined") {
     captureIntoTray: captureIntoTray,
     restoreFromTray: restoreFromTray,
     dragOutOfTray: dragOutOfTray,
-    reorderInTray: reorderInTray
+    reorderInTray: reorderInTray,
+    sortByOrder: sortByOrder,
+    movedBefore: movedBefore
   }
 }

@@ -46,6 +46,10 @@ into the bar's empty middle without pushing its neighbours around.
 - **Reorder inside the drawer**: drag a widget and release it over the tray —
   the insertion marker shows where it will land among the other widgets.
   Dropping it back where it was keeps everything unchanged.
+- **System tray icons are draggable too**: drag an icon (Dropbox, Beeper, …)
+  to rearrange it among the other icons; the order persists across restarts.
+  Icons can only move inside the tray — releasing one outside is a no-op,
+  since a status-notifier item has no life in the bar layout.
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.

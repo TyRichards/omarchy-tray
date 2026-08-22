@@ -41,6 +41,9 @@ BarWidget {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property var pinnedIds: TrayModel.asList(settings.pinned).map(String)
   readonly property var hiddenIds: TrayModel.asList(settings.hidden).map(String)
+  // User-arranged order of status-notifier icons; icons missing from the
+  // list keep arrival order after the arranged ones.
+  readonly property var iconOrderIds: TrayModel.asList(settings.iconOrder).map(String)
   readonly property var pinnedItems: bucket("pinned")
   readonly property var drawerItems: bucket("drawer")
   readonly property var allItems: bucket("all")
@@ -260,8 +263,32 @@ BarWidget {
   }
 
   function hostedDelegateAt(rootX, rootY) {
-    for (var i = 0; i < hostedDelegates.length; i++) {
-      var d = hostedDelegates[i]
+    return delegateAt(hostedDelegates, rootX, rootY)
+  }
+
+  // Live TrayItem delegates (status-notifier icons), for hit-testing and
+  // in-tray reordering. Unlike hosted widgets, these can only ever be
+  // rearranged inside the tray — they have no life in the bar layout.
+  property var trayIconDelegates: []
+
+  function registerTrayIconDelegate(item) {
+    if (!item || trayIconDelegates.indexOf(item) !== -1) return
+    var next = trayIconDelegates.slice()
+    next.push(item)
+    trayIconDelegates = next
+  }
+
+  function unregisterTrayIconDelegate(item) {
+    trayIconDelegates = trayIconDelegates.filter(function(d) { return d !== item })
+  }
+
+  function trayIconDelegateAt(rootX, rootY) {
+    return delegateAt(trayIconDelegates, rootX, rootY)
+  }
+
+  function delegateAt(delegates, rootX, rootY) {
+    for (var i = 0; i < delegates.length; i++) {
+      var d = delegates[i]
       if (!d || !d.visible || d.width <= 0 || d.height <= 0) continue
       var p
       try {
@@ -272,6 +299,53 @@ BarWidget {
       if (p.x >= 0 && p.x <= d.width && p.y >= 0 && p.y <= d.height) return d
     }
     return null
+  }
+
+  // Icon counterpart of hostedReorderPick: nearest insertion edge among the
+  // other visible tray icons, with beforeId resolved against the current
+  // sorted icon order ("" = move to the end).
+  function trayIconReorderPick(scenePoint, dragged) {
+    var axis = root.vertical ? scenePoint.y : scenePoint.x
+    var bestDelegate = null
+    var bestAfter = false
+    var bestDist = Infinity
+    for (var i = 0; i < trayIconDelegates.length; i++) {
+      var d = trayIconDelegates[i]
+      if (!d || d === dragged || !d.visible || d.width <= 0 || d.height <= 0) continue
+      var origin
+      try {
+        origin = d.mapToItem(null, 0, 0)
+      } catch (e) {
+        continue
+      }
+      var start = root.vertical ? origin.y : origin.x
+      var size = root.vertical ? d.height : d.width
+      var beforeDist = Math.abs(axis - start)
+      var afterDist = Math.abs(axis - (start + size))
+      var after = afterDist < beforeDist
+      var dist = after ? afterDist : beforeDist
+      if (dist < bestDist) {
+        bestDist = dist
+        bestDelegate = d
+        bestAfter = after
+      }
+    }
+    if (!bestDelegate) return null
+
+    var draggedId = dragged ? String(dragged.itemId || "") : ""
+    var ids = allItems.map(function(item) { return String(item.id || "") })
+    var targetIndex = ids.indexOf(String(bestDelegate.itemId || ""))
+    if (targetIndex === -1) return null
+    var beforeId
+    if (!bestAfter) {
+      beforeId = ids[targetIndex]
+    } else {
+      beforeId = ""
+      for (var j = targetIndex + 1; j < ids.length; j++) {
+        if (ids[j] !== draggedId) { beforeId = ids[j]; break }
+      }
+    }
+    return { delegate: bestDelegate, after: bestAfter, beforeId: beforeId }
   }
 
   // Stand-in for a bar module slot, fed to the bar's drag plumbing while a
@@ -329,6 +403,10 @@ BarWidget {
       // Wrapper id to insert before when released over the tray ("" = end);
       // null while the pointer is off the tray or nothing can be reordered.
       property var reorderBeforeId: null
+      // A status-notifier icon being dragged. Icons reorder within the tray
+      // only; releasing outside the tray is a deliberate no-op.
+      property var dragIconDelegate: null
+      property var iconReorderBeforeId: null
       readonly property bool canReorder: root.bar && root.bar.shell
         && typeof root.bar.shell.mutateShellConfig === "function"
       readonly property real dragThreshold: Style.space(4)
@@ -344,12 +422,13 @@ BarWidget {
       function beginDragOut(mouse) {
         var b = root.bar
         var win = root.QsWindow ? root.QsWindow.window : null
-        if (!b || !win || !dragDelegate) return false
-        fakeDragSlot.moduleName = String(dragDelegate.widgetId || "")
-        fakeDragSlot.activeItem = dragDelegate.activeItem || dragDelegate
+        var delegate = dragDelegate || dragIconDelegate
+        if (!b || !win || !delegate) return false
+        fakeDragSlot.moduleName = String(delegate.widgetId || delegate.itemId || "")
+        fakeDragSlot.activeItem = delegate.activeItem || delegate
         b.barDragWindow = win
         b.barDragScreen = win.screen
-        var local = dragOutMouse.mapToItem(dragDelegate, mouse.x, mouse.y)
+        var local = dragOutMouse.mapToItem(delegate, mouse.x, mouse.y)
         b.barDragOffsetX = local.x
         b.barDragOffsetY = local.y
         b.captureBarDragGhost(fakeDragSlot)
@@ -367,11 +446,29 @@ BarWidget {
         b.barDragScreenX = screenPoint.x
         b.barDragScreenY = screenPoint.y
 
+        var p = rootPoint(mouse)
+        var overTray = p.x >= 0 && p.x <= root.width && p.y >= 0 && p.y <= root.height
+
+        // Status-notifier icons only ever move inside the tray: mark the
+        // insertion edge among the other icons while over it, and never
+        // offer a bar-level drop target.
+        if (dragIconDelegate) {
+          b.barDragTarget = null
+          b.barDragAfter = false
+          if (overTray) {
+            var iconPick = root.trayIconReorderPick(scenePoint, dragIconDelegate)
+            iconReorderBeforeId = iconPick ? iconPick.beforeId : null
+            b.barDragTargetGeometry = iconPick ? b.dropMarkerRect(iconPick.delegate, iconPick.after) : null
+          } else {
+            iconReorderBeforeId = null
+            b.barDragTargetGeometry = null
+          }
+          return
+        }
+
         // Over the tray itself the release reorders instead of dropping out:
         // clear the bar-level drop target and mark the in-tray insertion
         // edge, reusing the bar's marker rendering for the visual.
-        var p = rootPoint(mouse)
-        var overTray = p.x >= 0 && p.x <= root.width && p.y >= 0 && p.y <= root.height
         if (overTray) {
           b.barDragTarget = null
           b.barDragAfter = false
@@ -401,10 +498,11 @@ BarWidget {
         pressedX = mouse.x
         pressedY = mouse.y
         dragDelegate = root.hostedDelegateAt(p.x, p.y)
+        dragIconDelegate = dragDelegate ? null : root.trayIconDelegateAt(p.x, p.y)
       }
 
       onPositionChanged: function(mouse) {
-        if (!canReorder || !dragDelegate || !(mouse.buttons & Qt.LeftButton)) return
+        if (!canReorder || !(dragDelegate || dragIconDelegate) || !(mouse.buttons & Qt.LeftButton)) return
 
         var distance = Math.abs(mouse.x - pressedX) + Math.abs(mouse.y - pressedY)
         if (!dragging && distance >= dragThreshold) {
@@ -427,6 +525,10 @@ BarWidget {
         var widgetId = fakeDragSlot.moduleName
         var reorder = reorderBeforeId
         reorderBeforeId = null
+        var wasIconDrag = dragIconDelegate !== null
+        var iconReorder = iconReorderBeforeId
+        iconReorderBeforeId = null
+        dragIconDelegate = null
         var toRegion = target ? String(target.region || "") : ""
         var beforeName = ""
         if (target && b) {
@@ -440,6 +542,19 @@ BarWidget {
         mouse.accepted = true
 
         if (!widgetId || !b || !b.shell) return
+
+        // Icon drags never leave the tray: reorder when released inside it,
+        // otherwise nothing happens. This is a settings-only write, so no
+        // bar rebuild occurs and deferring just keeps the release handler
+        // off the write path.
+        if (wasIconDrag) {
+          if (iconReorder === null || iconReorder === undefined) return
+          var ids = root.allItems.map(function(item) { return String(item.id || "") })
+          var nextOrder = TrayModel.movedBefore(ids, widgetId, String(iconReorder))
+          if (nextOrder) Qt.callLater(function() { root.persistState({ iconOrder: nextOrder }) })
+          return
+        }
+
         var shellRef = b.shell
         var trayId = root.moduleName || "io.github.tyrichards.tray"
         // Deferred for the same reason as drag-in: a synchronous write would
@@ -467,6 +582,8 @@ BarWidget {
         dragging = false
         suppressClick = false
         reorderBeforeId = null
+        iconReorderBeforeId = null
+        dragIconDelegate = null
         if (root.bar && root.bar.barDragSource === fakeDragSlot) root.bar.clearBarDrag()
         fakeDragSlot.activeItem = null
         fakeDragSlot.moduleName = ""
@@ -652,7 +769,7 @@ BarWidget {
       }
       if (classifyItem(item) === category) result.push(item)
     }
-    return result
+    return TrayModel.sortByOrder(result, iconOrderIds)
   }
 
   // Writes the widget's full inline state. updateEntryInline replaces the
@@ -1382,9 +1499,17 @@ BarWidget {
 
     required property var modelData
 
+    readonly property string itemId: String(modelData.id || "")
+
     visible: modelData.status !== Status.Passive
     implicitWidth: visible ? root.trayItemExtent : 0
     implicitHeight: visible ? root.trayItemExtent : 0
+
+    Component.onCompleted: root.registerTrayIconDelegate(trayItemRoot)
+    Component.onDestruction: {
+      root.unregisterTrayIconDelegate(trayItemRoot)
+      if (dragOutMouse && dragOutMouse.dragIconDelegate === trayItemRoot) dragOutMouse.dragIconDelegate = null
+    }
 
     function displayMenu(mouse) {
       root.openTrayMenu(trayItemRoot.modelData, trayItemRoot, mouse)
