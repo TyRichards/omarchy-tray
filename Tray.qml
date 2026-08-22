@@ -60,9 +60,25 @@ BarWidget {
   })
   readonly property bool hasDrawerContent: drawerCount > 0 || hostedDrawer.length > 0
 
+  // True while an open popup belongs to the tray or to a widget hosted in
+  // it: the bar's popout coordinator tracks the owning widget item, and
+  // panels register their widget root as owner. Holds the drawer open while
+  // a hosted widget's panel is up; it collapses when that panel closes
+  // (escape, click-away) or when a panel outside the tray takes over.
+  readonly property bool ownPopoutActive: {
+    var popout = root.bar ? root.bar.activePopout : null
+    if (!popout) return false
+    if (popout === root) return true
+    for (var i = 0; i < hostedDelegates.length; i++) {
+      var d = hostedDelegates[i]
+      if (d && (d === popout || d.activeItem === popout)) return true
+    }
+    return false
+  }
+
   // Match Waybar's group/tray-expander drawer transition-duration.
   readonly property int animationDuration: 600
-  property real revealProgress: (expanded || dragOver) ? 1 : 0
+  property real revealProgress: (expanded || dragOver || ownPopoutActive) ? 1 : 0
 
   Behavior on revealProgress {
     NumberAnimation { duration: root.animationDuration; easing.type: Easing.OutCubic }
