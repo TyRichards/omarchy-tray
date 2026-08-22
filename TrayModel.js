@@ -141,6 +141,31 @@ function captureIntoTray(config, trayId, sourceId, fromRegion, fromIndex) {
   return true
 }
 
+// Remove `widgetId`'s wrapper from a tray entry (widgets + pinnedWidgets)
+// and return it, or null when it isn't hosted there.
+function takeWrapper(trayEntry, widgetId) {
+  var wrappers = Array.isArray(trayEntry.widgets) ? trayEntry.widgets : []
+  var index = -1
+  for (var i = 0; i < wrappers.length; i++) {
+    if (wrapperId(wrappers[i]) === widgetId) { index = i; break }
+  }
+  if (index === -1) return null
+  var wrapper = wrappers.splice(index, 1)[0]
+  if (wrappers.length === 0) delete trayEntry.widgets
+  if (Array.isArray(trayEntry.pinnedWidgets)) {
+    trayEntry.pinnedWidgets = trayEntry.pinnedWidgets.filter(function(id) { return id !== widgetId })
+    if (trayEntry.pinnedWidgets.length === 0) delete trayEntry.pinnedWidgets
+  }
+  return wrapper
+}
+
+function indexOfEntry(entries, id) {
+  for (var i = 0; i < entries.length; i++) {
+    if (entryId(entries[i]) === id) return i
+  }
+  return -1
+}
+
 // Mutates `config` in place: take `widgetId` out of the tray's `widgets` list
 // and put its entry back into the bar layout, next to the tray when they share
 // a section, otherwise at the inner edge of the section it came from.
@@ -150,21 +175,8 @@ function restoreFromTray(config, trayId, widgetId) {
 
   var tray = findLayoutEntry(layout, trayId)
   if (!tray || typeof tray.entry === "string") return false
-  var trayEntry = tray.entry
-  var wrappers = Array.isArray(trayEntry.widgets) ? trayEntry.widgets : []
-
-  var index = -1
-  for (var i = 0; i < wrappers.length; i++) {
-    if (wrapperId(wrappers[i]) === widgetId) { index = i; break }
-  }
-  if (index === -1) return false
-
-  var wrapper = wrappers.splice(index, 1)[0]
-  if (wrappers.length === 0) delete trayEntry.widgets
-  if (Array.isArray(trayEntry.pinnedWidgets)) {
-    trayEntry.pinnedWidgets = trayEntry.pinnedWidgets.filter(function(id) { return id !== widgetId })
-    if (trayEntry.pinnedWidgets.length === 0) delete trayEntry.pinnedWidgets
-  }
+  var wrapper = takeWrapper(tray.entry, widgetId)
+  if (!wrapper) return false
 
   var entry = wrapper && wrapper.entry ? wrapper.entry : wrapper
   var from = wrapper && SECTIONS.indexOf(wrapper.from) !== -1 ? wrapper.from : "right"
@@ -181,6 +193,28 @@ function restoreFromTray(config, trayId, widgetId) {
   return true
 }
 
+// Drop a hosted widget back into the bar layout at an explicit position —
+// the drag-out counterpart of captureIntoTray. Inserts before `beforeName`
+// in `toRegion`, or at the section's end when beforeName is empty or gone.
+function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
+  var layout = config && config.bar ? config.bar.layout : null
+  if (!layout) return false
+
+  var tray = findLayoutEntry(layout, trayId)
+  if (!tray || typeof tray.entry === "string") return false
+  var wrapper = takeWrapper(tray.entry, widgetId)
+  if (!wrapper) return false
+
+  var entry = wrapper && wrapper.entry ? wrapper.entry : wrapper
+  var region = SECTIONS.indexOf(toRegion) !== -1 ? toRegion : "right"
+  if (!Array.isArray(layout[region])) layout[region] = []
+  var target = layout[region]
+  var index = beforeName ? indexOfEntry(target, String(beforeName)) : -1
+  if (index < 0) target.push(entry)
+  else target.splice(index, 0, entry)
+  return true
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
@@ -193,6 +227,7 @@ if (typeof module !== "undefined") {
     wrapperId: wrapperId,
     findLayoutEntry: findLayoutEntry,
     captureIntoTray: captureIntoTray,
-    restoreFromTray: restoreFromTray
+    restoreFromTray: restoreFromTray,
+    dragOutOfTray: dragOutOfTray
   }
 }

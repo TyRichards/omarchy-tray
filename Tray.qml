@@ -19,7 +19,20 @@ BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
 
-  property bool expanded: false
+  // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
+  // two stacked hover items (the overlay plus a handler in the drawer) fight
+  // over hover and oscillate the reveal, so the overlay is the one authority.
+  // Expanded while the pointer is over the widget short of the pinned block.
+  property bool expanded: {
+    if (!overlayHover.hovered) return false
+    var pos = overlayHover.point.position
+    var main = root.vertical ? pos.y : pos.x
+    var limit = (root.vertical ? root.height : root.width) - pinnedExtent
+    return main < limit
+  }
+  // Extent of the always-visible pinned block at the widget's outer end,
+  // exported by whichever orientation component is loaded.
+  property real pinnedExtent: 0
   property bool managePopupOpen: false
   property bool trayMenuOpen: false
   property var activeTrayItem: null
@@ -152,6 +165,243 @@ BarWidget {
 
     function onBarDragSceneXChanged() { root.updateDragOver() }
     function onBarDragSceneYChanged() { root.updateDragOver() }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drag-out-of-tray. A transparent overlay is parented into the bar's module
+  // slot ABOVE its whole-slot drag MouseArea, covering everything except the
+  // chevron. Dragging a hosted widget there drives the bar's own drag state
+  // (ghost, drop marker) through a stand-in slot, and the drop moves the
+  // widget's entry back into the bar layout at that position. Consequence:
+  // the chevron is the only handle that moves the tray itself.
+  // ---------------------------------------------------------------------------
+
+  // Extent of the chevron along the bar axis, exported by whichever
+  // orientation component is loaded. The drag-out overlay starts after it.
+  property real chevronExtent: 0
+
+  // Live HostedWidget delegates, for hit-testing which widget a press lands on.
+  property var hostedDelegates: []
+
+  function registerHostedDelegate(item) {
+    if (!item || hostedDelegates.indexOf(item) !== -1) return
+    var next = hostedDelegates.slice()
+    next.push(item)
+    hostedDelegates = next
+  }
+
+  function unregisterHostedDelegate(item) {
+    hostedDelegates = hostedDelegates.filter(function(d) { return d !== item })
+  }
+
+  function hostedDelegateAt(rootX, rootY) {
+    for (var i = 0; i < hostedDelegates.length; i++) {
+      var d = hostedDelegates[i]
+      if (!d || !d.visible || d.width <= 0 || d.height <= 0) continue
+      var p
+      try {
+        p = root.mapToItem(d, rootX, rootY)
+      } catch (e) {
+        continue
+      }
+      if (p.x >= 0 && p.x <= d.width && p.y >= 0 && p.y <= d.height) return d
+    }
+    return null
+  }
+
+  // Stand-in for a bar module slot, fed to the bar's drag plumbing while a
+  // hosted widget is dragged out. Provides exactly the properties the bar
+  // reads from a drag source: moduleName, region, and activeItem (for the
+  // ghost image and window resolution).
+  Item {
+    id: fakeDragSlot
+    visible: false
+    property string region: "tray"
+    property string moduleName: ""
+    property var activeItem: null
+  }
+
+  Item {
+    id: dragOutOverlay
+    // The slot stacks its own drag MouseArea above every widget it loads, so
+    // an overlay that must win the press has to live beside it in the slot,
+    // not inside this widget. Our root fills the slot, so root coordinates
+    // are slot coordinates. Covers the whole widget; presses in the chevron
+    // zone are rejected below so they fall through to the slot's MouseArea,
+    // making the chevron the tray's only whole-widget drag handle.
+    parent: root.parent && root.parent.parent ? root.parent.parent : root
+    z: 60
+    visible: root.visible && parent !== root
+    x: 0
+    y: 0
+    width: root.width
+    height: root.height
+
+    // The single hover authority for the tray (drives root.expanded) and the
+    // pointing-hand cursor over clickable content. Non-blocking, so hosted
+    // widgets' own hover styling and tooltips still work underneath.
+    HoverHandler {
+      id: overlayHover
+      cursorShape: {
+        var slot = dragOutOverlay.parent
+        if (root && root.bar && slot !== root && typeof root.bar.moduleClickTargetAt === "function"
+            && root.bar.moduleClickTargetAt(slot,
+                 dragOutOverlay.x + overlayHover.point.position.x,
+                 dragOutOverlay.y + overlayHover.point.position.y))
+          return Qt.PointingHandCursor
+        return Qt.ArrowCursor
+      }
+    }
+
+    MouseArea {
+      id: dragOutMouse
+
+      property bool dragging: false
+      property bool suppressClick: false
+      property real pressedX: 0
+      property real pressedY: 0
+      property var dragDelegate: null
+      readonly property bool canReorder: root.bar && root.bar.shell
+        && typeof root.bar.shell.mutateShellConfig === "function"
+      readonly property real dragThreshold: Style.space(4)
+
+      anchors.fill: parent
+      acceptedButtons: Qt.LeftButton
+      propagateComposedEvents: true
+
+      function rootPoint(mouse) {
+        return dragOutMouse.mapToItem(root, mouse.x, mouse.y)
+      }
+
+      function beginDragOut(mouse) {
+        var b = root.bar
+        var win = root.QsWindow ? root.QsWindow.window : null
+        if (!b || !win || !dragDelegate) return false
+        fakeDragSlot.moduleName = String(dragDelegate.widgetId || "")
+        fakeDragSlot.activeItem = dragDelegate.activeItem || dragDelegate
+        b.barDragWindow = win
+        b.barDragScreen = win.screen
+        var local = dragOutMouse.mapToItem(dragDelegate, mouse.x, mouse.y)
+        b.barDragOffsetX = local.x
+        b.barDragOffsetY = local.y
+        b.captureBarDragGhost(fakeDragSlot)
+        b.barDragSource = fakeDragSlot
+        return true
+      }
+
+      function updateDragOut(mouse) {
+        var b = root.bar
+        if (!b) return
+        var scenePoint = dragOutMouse.mapToItem(null, mouse.x, mouse.y)
+        var screenPoint = b.barDragScreenPoint(scenePoint)
+        b.barDragSceneX = scenePoint.x
+        b.barDragSceneY = scenePoint.y
+        b.barDragScreenX = screenPoint.x
+        b.barDragScreenY = screenPoint.y
+
+        // Over the tray itself, suppress the insertion marker: releasing here
+        // keeps the widget in the tray (the tray's own drop highlight shows).
+        var p = rootPoint(mouse)
+        var overTray = p.x >= 0 && p.x <= root.width && p.y >= 0 && p.y <= root.height
+        if (overTray) {
+          b.barDragTarget = null
+          b.barDragAfter = false
+          b.barDragTargetGeometry = null
+          return
+        }
+        var drop = b.moduleDropAtScene(scenePoint, fakeDragSlot)
+        b.barDragTarget = drop ? drop.slot : null
+        b.barDragAfter = drop ? drop.after : false
+        b.barDragTargetGeometry = drop ? b.dropMarkerRect(drop.slot, drop.after) : null
+      }
+
+      onPressed: function(mouse) {
+        dragging = false
+        suppressClick = false
+        var p = rootPoint(mouse)
+        // Chevron zone: refuse the press so it falls through to the slot's
+        // own MouseArea — dragging the chevron moves the whole tray.
+        var main = root.vertical ? p.y : p.x
+        if (root.chevronExtent > 0 && main < root.chevronExtent) {
+          mouse.accepted = false
+          return
+        }
+        pressedX = mouse.x
+        pressedY = mouse.y
+        dragDelegate = root.hostedDelegateAt(p.x, p.y)
+      }
+
+      onPositionChanged: function(mouse) {
+        if (!canReorder || !dragDelegate || !(mouse.buttons & Qt.LeftButton)) return
+
+        var distance = Math.abs(mouse.x - pressedX) + Math.abs(mouse.y - pressedY)
+        if (!dragging && distance >= dragThreshold) {
+          if (!beginDragOut(mouse)) return
+          dragging = true
+          if (root.bar) root.bar.hideTooltip(root)
+        }
+        if (dragging) updateDragOut(mouse)
+      }
+
+      onReleased: function(mouse) {
+        var wasDragging = dragging
+        dragging = false
+        if (!wasDragging) return
+
+        suppressClick = true
+        var b = root.bar
+        var target = b ? b.barDragTarget : null
+        var after = b ? b.barDragAfter : false
+        var widgetId = fakeDragSlot.moduleName
+        var toRegion = target ? String(target.region || "") : ""
+        var beforeName = ""
+        if (target && b) {
+          beforeName = after
+            ? String(b.nextVisibleModuleName(target.region, target.moduleName, fakeDragSlot) || "")
+            : String(target.moduleName || "")
+        }
+        if (b) b.clearBarDrag()
+        fakeDragSlot.activeItem = null
+        fakeDragSlot.moduleName = ""
+        mouse.accepted = true
+
+        if (!target || !toRegion || !widgetId || !b || !b.shell) return
+        var shellRef = b.shell
+        var trayId = root.moduleName || "io.github.tyrichards.tray"
+        // Deferred for the same reason as drag-in: a synchronous write would
+        // rebuild the bar while this release handler is on the stack. The
+        // closure holds only the shell reference and plain values.
+        Qt.callLater(function() {
+          if (typeof shellRef.mutateShellConfig !== "function") return
+          shellRef.mutateShellConfig(function(config) {
+            TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
+          })
+        })
+      }
+
+      onCanceled: {
+        dragging = false
+        suppressClick = false
+        if (root.bar && root.bar.barDragSource === fakeDragSlot) root.bar.clearBarDrag()
+        fakeDragSlot.activeItem = null
+        fakeDragSlot.moduleName = ""
+      }
+
+      onClicked: function(mouse) {
+        if (suppressClick) {
+          suppressClick = false
+          mouse.accepted = true
+          return
+        }
+        // Mirror the slot MouseArea's click routing so hosted widgets and
+        // tray icons behave exactly as before: registered click targets get
+        // triggerPress, everything else sees the composed click propagate.
+        var slot = dragOutOverlay.parent
+        if (slot === root || !root.bar || typeof root.bar.pressModuleClickTarget !== "function"
+            || !root.bar.pressModuleClickTarget(slot, mouse.button, dragOutOverlay.x + mouse.x, dragOutOverlay.y + mouse.y))
+          mouse.accepted = false
+      }
+    }
   }
 
   function restoreWidget(widgetId) {
@@ -404,16 +654,24 @@ BarWidget {
       implicitWidth: drawerBlockWidth + pinnedRow.implicitWidth
       implicitHeight: root.barSize
 
+      Binding {
+        target: root
+        property: "chevronExtent"
+        value: horizontalTrayRoot.showDrawerBlock ? expandIcon.implicitWidth : 0
+      }
+
+      Binding {
+        target: root
+        property: "pinnedExtent"
+        value: pinnedRow.implicitWidth
+      }
+
       Item {
         id: drawerArea
         x: 0
         width: horizontalTrayRoot.drawerBlockWidth
         height: root.barSize
         visible: horizontalTrayRoot.showDrawerBlock
-
-        HoverHandler {
-          onHoveredChanged: root.expanded = hovered
-        }
 
         BarIconButton {
           id: expandIcon
@@ -490,16 +748,24 @@ BarWidget {
       implicitWidth: root.barSize
       implicitHeight: drawerBlockHeight + pinnedCol.implicitHeight
 
+      Binding {
+        target: root
+        property: "chevronExtent"
+        value: verticalTrayRoot.showDrawerBlock ? expandIcon.implicitHeight : 0
+      }
+
+      Binding {
+        target: root
+        property: "pinnedExtent"
+        value: pinnedCol.implicitHeight
+      }
+
       Item {
         id: drawerArea
         y: 0
         width: root.barSize
         height: verticalTrayRoot.drawerBlockHeight
         visible: verticalTrayRoot.showDrawerBlock
-
-        HoverHandler {
-          onHoveredChanged: root.expanded = hovered
-        }
 
         BarIconButton {
           id: expandIcon
@@ -1113,6 +1379,14 @@ BarWidget {
     implicitHeight: activeItem && activeItem.visible ? (root.vertical ? activeItem.implicitHeight : root.barSize) : 0
     width: implicitWidth
     height: implicitHeight
+
+    Component.onCompleted: root.registerHostedDelegate(hostedRoot)
+    Component.onDestruction: {
+      // Unregister first: if anything below throws mid-teardown, a stale
+      // delegate left in the list would poison every future hit test.
+      root.unregisterHostedDelegate(hostedRoot)
+      if (dragOutMouse && dragOutMouse.dragDelegate === hostedRoot) dragOutMouse.dragDelegate = null
+    }
 
     onActiveItemChanged: Qt.callLater(injectProps)
     onWidgetSettingsChanged: injectProps()

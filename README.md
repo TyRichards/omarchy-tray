@@ -40,6 +40,12 @@ into the bar's empty middle without pushing its neighbours around.
 - **Drag any bar widget onto the tray** (drag starts after a short move, same
   as reordering the bar). The tray highlights while you are over it; release
   to capture the widget into the drawer.
+- **Drag a widget back out**: open the drawer, grab the widget, and drag it
+  onto the bar — it lands wherever you drop it, with the bar's usual ghost
+  and insertion marker. Dropping back on the tray keeps it inside.
+- **Drag the chevron to move the whole tray.** The chevron is the tray's only
+  whole-widget drag handle; grabbing anything else in the tray never drags
+  the tray itself.
 - **Right-click the chevron** for the manage popup:
   - *Widgets*: **Pin** (always visible, outside the drawer) / **Unpin**, and
     **Restore** to put a widget back into the bar section it came from.
