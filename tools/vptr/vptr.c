@@ -14,6 +14,7 @@
 #include "wlr-virtual-pointer-unstable-v1-client-protocol.h"
 
 #define BTN_LEFT 0x110
+#define BTN_RIGHT 0x111
 
 static struct zwlr_virtual_pointer_manager_v1 *manager;
 static struct wl_seat *seat;
@@ -61,7 +62,13 @@ int main(void) {
   while (fgets(line, sizeof line, stdin)) {
     double dx, dy, ex, ey;
     int ms;
-    if (strncmp(line, "press", 5) == 0) {
+    if (strncmp(line, "rpress", 6) == 0) {
+      zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_RIGHT, WL_POINTER_BUTTON_STATE_PRESSED);
+      zwlr_virtual_pointer_v1_frame(pointer);
+    } else if (strncmp(line, "rrelease", 8) == 0) {
+      zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_RIGHT, WL_POINTER_BUTTON_STATE_RELEASED);
+      zwlr_virtual_pointer_v1_frame(pointer);
+    } else if (strncmp(line, "press", 5) == 0) {
       zwlr_virtual_pointer_v1_button(pointer, now_ms(), BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED);
       zwlr_virtual_pointer_v1_frame(pointer);
     } else if (strncmp(line, "release", 7) == 0) {

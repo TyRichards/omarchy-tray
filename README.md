@@ -43,20 +43,19 @@ into the bar's empty middle without pushing its neighbours around.
 - **Drag a widget back out**: open the drawer, grab the widget, and drag it
   onto the bar — it lands wherever you drop it, with the bar's usual ghost
   and insertion marker.
-- **Reorder inside the drawer**: drag a widget and release it over the tray —
-  the insertion marker shows where it will land among the other widgets.
-  Dropping it back where it was keeps everything unchanged.
-- **System tray icons are draggable too**: drag an icon (Dropbox, Beeper, …)
-  to rearrange it among the other icons; the order persists across restarts.
-  Icons can only move inside the tray — releasing one outside is a no-op,
-  since a status-notifier item has no life in the bar layout.
+- **Reorder inside the drawer**: drag anything — plugin widget or system
+  tray icon — and release it over the tray; the insertion marker shows where
+  it lands. Widgets and icons share one order, so the two kinds interleave
+  freely, and the arrangement persists across restarts.
+- **Icons stay inside**: a system tray icon can only move within the tray —
+  releasing one outside is a no-op, since a status-notifier item has no life
+  in the bar layout. Widgets still drag out normally.
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.
-- **Right-click the chevron** for the manage popup:
-  - *Widgets*: **Pin** (always visible, outside the drawer) / **Unpin**, and
-    **Restore** to put a widget back into the bar section it came from.
-  - *Tray icons*: **Pin** / **Hide**, exactly like the stock tray.
+- **Right-click the chevron** for the manage popup: a **Show System Tray
+  Icons** master toggle, and a **Hide** switch per icon. Widgets have no
+  popup controls — dragging is the whole interface.
 - Captured widgets keep their inline settings, clicks, tooltips, wheel
   actions, and panels. Widget state (what's captured, what's pinned) is stored
   on the tray's own `shell.json` entry, so it survives restarts and is shared

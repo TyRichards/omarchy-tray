@@ -181,9 +181,9 @@ function takeWrapper(trayEntry, widgetId) {
   if (index === -1) return null
   var wrapper = wrappers.splice(index, 1)[0]
   if (wrappers.length === 0) delete trayEntry.widgets
-  if (Array.isArray(trayEntry.pinnedWidgets)) {
-    trayEntry.pinnedWidgets = trayEntry.pinnedWidgets.filter(function(id) { return id !== widgetId })
-    if (trayEntry.pinnedWidgets.length === 0) delete trayEntry.pinnedWidgets
+  if (Array.isArray(trayEntry.order)) {
+    trayEntry.order = trayEntry.order.filter(function(token) { return String(token) !== widgetId })
+    if (trayEntry.order.length === 0) delete trayEntry.order
   }
   return wrapper
 }
@@ -248,16 +248,24 @@ function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
   return true
 }
 
-// Sort status-notifier items by the persisted `iconOrder` id list. Items not
-// in the list keep their arrival order, after every ordered one, so new tray
-// icons appear at the end instead of shuffling the arranged ones.
+// Sort drawer content by the persisted `order` token list. Works on anything
+// carrying a `key` (mixed drawer entries) or an `id` (raw status-notifier
+// items). Tokens not in the list keep their arrival order, after every
+// ordered one, so new content appears at the end instead of shuffling the
+// arranged pieces.
+function orderKey(item) {
+  if (!item) return ""
+  if (item.key !== undefined) return String(item.key)
+  return String(item.id || "")
+}
+
 function sortByOrder(items, order) {
   var ord = asList(order).map(String)
   var decorated = []
   for (var i = 0; i < items.length; i++) decorated.push({ item: items[i], index: i })
   decorated.sort(function(a, b) {
-    var ai = ord.indexOf(String(a.item.id || ""))
-    var bi = ord.indexOf(String(b.item.id || ""))
+    var ai = ord.indexOf(orderKey(a.item))
+    var bi = ord.indexOf(orderKey(b.item))
     var ak = ai === -1 ? ord.length + a.index : ai
     var bk = bi === -1 ? ord.length + b.index : bi
     return ak - bk
@@ -279,37 +287,6 @@ function movedBefore(order, id, beforeId) {
   return ids
 }
 
-// Mutates `config` in place: move `widgetId`'s wrapper within the tray's
-// widgets list so it sits before `beforeId` (empty string = move to the end).
-// Returns true when the order actually changed.
-function reorderInTray(config, trayId, widgetId, beforeId) {
-  var layout = config && config.bar ? config.bar.layout : null
-  if (!layout) return false
-  var tray = findLayoutEntry(layout, trayId)
-  if (!tray || typeof tray.entry === "string") return false
-  var wrappers = Array.isArray(tray.entry.widgets) ? tray.entry.widgets : []
-
-  var from = -1
-  for (var i = 0; i < wrappers.length; i++) {
-    if (wrapperId(wrappers[i]) === widgetId) { from = i; break }
-  }
-  if (from === -1) return false
-
-  var wrapper = wrappers.splice(from, 1)[0]
-  var to = wrappers.length
-  if (beforeId) {
-    for (var j = 0; j < wrappers.length; j++) {
-      if (wrapperId(wrappers[j]) === String(beforeId)) { to = j; break }
-    }
-  }
-  if (to === from) {
-    wrappers.splice(from, 0, wrapper)
-    return false
-  }
-  wrappers.splice(to, 0, wrapper)
-  return true
-}
-
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
@@ -326,7 +303,6 @@ if (typeof module !== "undefined") {
     captureIntoTray: captureIntoTray,
     restoreFromTray: restoreFromTray,
     dragOutOfTray: dragOutOfTray,
-    reorderInTray: reorderInTray,
     sortByOrder: sortByOrder,
     movedBefore: movedBefore
   }
