@@ -92,6 +92,32 @@ function wrapperId(wrapper) {
   return wrapper.entry ? entryId(wrapper.entry) : entryId(wrapper)
 }
 
+// The shell loads a third-party plugin's widget component only while its id
+// is referenced in shell.json (bar.id, a bar.layout entry, or plugins[]).
+// A captured widget's id lives inside the tray's settings, which that scan
+// does not see, so without a plugins[] entry the shell unloads the component
+// and the hosted widget renders as nothing. Returns true when an entry was
+// added (i.e. the tray owns it and must remove it again on release).
+function ensurePluginListed(config, id) {
+  if (!Array.isArray(config.plugins)) config.plugins = []
+  for (var i = 0; i < config.plugins.length; i++) {
+    var e = config.plugins[i]
+    var eid = typeof e === "string" ? e : (e ? String(e.id || "") : "")
+    if (eid === id) return false
+  }
+  config.plugins.push({ id: id })
+  return true
+}
+
+function unlistPlugin(config, id) {
+  if (!Array.isArray(config.plugins)) return
+  config.plugins = config.plugins.filter(function(e) {
+    if (!e) return false
+    var eid = typeof e === "string" ? e : String(e.id || "")
+    return eid !== id
+  })
+}
+
 function findLayoutEntry(layout, id) {
   for (var s = 0; s < SECTIONS.length; s++) {
     var entries = layout ? layout[SECTIONS[s]] : null
@@ -137,7 +163,10 @@ function captureIntoTray(config, trayId, sourceId, fromRegion, fromIndex) {
   var entry = typeof source.entry === "string" ? { id: source.entry } : source.entry
   var from = SECTIONS.indexOf(fromRegion) !== -1 ? fromRegion : source.section
   var at = typeof fromIndex === "number" && fromIndex >= 0 ? fromIndex : source.index
-  trayEntry.widgets.push({ entry: entry, from: from, at: at })
+  var wrapper = { entry: entry, from: from, at: at }
+  // Keep the plugin loaded while its only reference is inside the tray.
+  if (ensurePluginListed(config, sourceId)) wrapper.listed = true
+  trayEntry.widgets.push(wrapper)
   return true
 }
 
@@ -177,6 +206,8 @@ function restoreFromTray(config, trayId, widgetId) {
   if (!tray || typeof tray.entry === "string") return false
   var wrapper = takeWrapper(tray.entry, widgetId)
   if (!wrapper) return false
+  // Back in the layout, the entry itself keeps the plugin loaded again.
+  if (wrapper.listed) unlistPlugin(config, widgetId)
 
   var entry = wrapper && wrapper.entry ? wrapper.entry : wrapper
   var from = wrapper && SECTIONS.indexOf(wrapper.from) !== -1 ? wrapper.from : "right"
@@ -204,6 +235,8 @@ function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
   if (!tray || typeof tray.entry === "string") return false
   var wrapper = takeWrapper(tray.entry, widgetId)
   if (!wrapper) return false
+  // Back in the layout, the entry itself keeps the plugin loaded again.
+  if (wrapper.listed) unlistPlugin(config, widgetId)
 
   var entry = wrapper && wrapper.entry ? wrapper.entry : wrapper
   var region = SECTIONS.indexOf(toRegion) !== -1 ? toRegion : "right"
@@ -218,6 +251,8 @@ function dragOutOfTray(config, trayId, widgetId, toRegion, beforeName) {
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
+    ensurePluginListed: ensurePluginListed,
+    unlistPlugin: unlistPlugin,
     itemNamed: itemNamed,
     entryId: entryId,
     entrySettings: entrySettings,
