@@ -119,7 +119,7 @@ function captureIntoTray(config, trayId, sourceId, fromRegion) {
   if (!Array.isArray(trayEntry.widgets)) trayEntry.widgets = []
   var entry = typeof source.entry === "string" ? { id: source.entry } : source.entry
   var from = SECTIONS.indexOf(fromRegion) !== -1 ? fromRegion : source.section
-  trayEntry.widgets.push({ entry: entry, from: from })
+  trayEntry.widgets.push({ entry: entry, from: from, at: source.index })
   return true
 }
 
@@ -152,7 +152,12 @@ function restoreFromTray(config, trayId, widgetId) {
   var from = wrapper && SECTIONS.indexOf(wrapper.from) !== -1 ? wrapper.from : "right"
   if (!Array.isArray(layout[from])) layout[from] = []
   var target = layout[from]
-  if (from === tray.section) target.splice(tray.index + 1, 0, entry)
+  // Best effort back to where it was captured from: the recorded index, when
+  // one was recorded and still fits; otherwise beside the tray or at the
+  // section's inner edge.
+  var at = wrapper && typeof wrapper.at === "number" && wrapper.at >= 0 ? Math.min(Math.round(wrapper.at), target.length) : -1
+  if (at !== -1) target.splice(at, 0, entry)
+  else if (from === tray.section) target.splice(tray.index + 1, 0, entry)
   else if (from === "right") target.unshift(entry)
   else target.push(entry)
   return true
