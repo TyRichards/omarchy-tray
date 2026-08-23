@@ -17,6 +17,10 @@ modules, third-party plugin widgets — anything that lives in the bar layout
 can be tucked into the tray. Taken to the limit, your bar can be nothing but
 this tray, with everything else sliding out on hover.
 
+![The tray's drawer and manage popup](preview.png)
+
+![Drawer, capture, and reorder in action](demo.gif)
+
 ## Install
 
 ```bash
