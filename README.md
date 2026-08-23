@@ -89,6 +89,7 @@ If you replaced the stock tray, put it back with
   actions, and panels. Tray state (what's captured, the drawer order, hidden
   icons) is stored on the tray's own `shell.json` entry, so it survives
   restarts and is shared across monitors.
+
 ## Vertical bars
 
 Everything works the same on a left- or right-edge bar — the drawer slides
