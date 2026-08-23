@@ -893,18 +893,22 @@ BarWidget {
       anchors.fill: parent
       spacing: Style.space(8)
 
-      Text {
-        text: "Tray"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
-        font.bold: true
-      }
-
-      PanelSectionHeader {
-        text: "HIDE AND ORGANIZE YOUR ICONS"
+      // Same hero arrangement as the audio panel: display-size glyph, title,
+      // and an auto-uppercased letter-spaced caption (PanelHero's meta).
+      PanelHero {
+        width: manageColumn.width
+        title: "Tray"
+        meta: "Hide and organize your icons"
         foreground: root.foreground
         fontFamily: root.fontFamily
+        iconComponent: Component {
+          Text {
+            text: "󱊖"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.display
+          }
+        }
       }
 
       PanelSeparator {
