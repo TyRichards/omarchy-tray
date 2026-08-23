@@ -43,8 +43,9 @@ into the bar's empty middle without pushing its neighbours around.
 - **Hover the chevron** to slide the drawer open; tray icons and captured
   widgets live inside it.
 - **Drag any bar widget onto the tray** (drag starts after a short move, same
-  as reordering the bar). The tray highlights while you are over it; release
-  to capture the widget into the drawer.
+  as reordering the bar). The tray highlights while you are over it and the
+  insertion marker shows where the widget will land among the drawer's
+  content — release and it slots in exactly there.
 - **Drag a widget back out**: open the drawer, grab the widget, and drag it
   onto the bar — it lands wherever you drop it, with the bar's usual ghost
   and insertion marker.
@@ -67,9 +68,12 @@ into the bar's empty middle without pushing its neighbours around.
   the drawer (the panel's focus grab swallows hover anyway) — click the
   chevron instead: the open panel closes and the drawer opens.
 - Captured widgets keep their inline settings, clicks, tooltips, wheel
-  actions, and panels. Widget state (what's captured, what's pinned) is stored
-  on the tray's own `shell.json` entry, so it survives restarts and is shared
-  across monitors.
+  actions, and panels. Tray state (what's captured, the drawer order, hidden
+  icons) is stored on the tray's own `shell.json` entry, so it survives
+  restarts and is shared across monitors.
+- On a vertical bar (or with a very wide drawer on a horizontal one) the open
+  drawer can overrun the bar's center section; while the drawer is out the
+  center widgets are scrimmed and inert so the two never fight.
 
 ## Notes and limitations
 

@@ -89,6 +89,100 @@ BarWidget {
     return false
   }
 
+  // ---------------------------------------------------------------------------
+  // Center-section fence. While the drawer is out it can overrun the bar's
+  // center widgets (always on a vertical bar, and on a horizontal one when
+  // the drawer is wide), so the whole center section is scrimmed and made
+  // inert for the duration. The scrim is two rectangles — the center span
+  // minus whatever part the tray itself covers — parented to the bar window
+  // above every section, so it dims center content without ever dimming the
+  // drawer. Geometry is refreshed on a timer while visible: the reveal
+  // animates and center widgets (the clock) resize on their own.
+  // ---------------------------------------------------------------------------
+
+  readonly property bool drawerOut: revealProgress > 0.02
+
+  component ScrimBlock: Rectangle {
+    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    z: 80
+    visible: root.drawerOut && parent !== root && width > 0.5 && height > 0.5
+    color: root.bar ? root.bar.background : Color.background
+    opacity: 0.8 * root.revealProgress
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.AllButtons
+      onWheel: function(wheel) { wheel.accepted = true }
+    }
+  }
+
+  ScrimBlock { id: scrimBefore }
+  ScrimBlock { id: scrimAfter }
+
+  onDrawerOutChanged: if (drawerOut) updateCenterScrim()
+
+  Timer {
+    running: root.drawerOut
+    interval: 120
+    repeat: true
+    onTriggered: root.updateCenterScrim()
+  }
+
+  function updateCenterScrim() {
+    var win = root.QsWindow ? root.QsWindow.window : null
+    var b = root.bar
+    if (!win || !win.contentItem || !b || !b.moduleSlots) {
+      scrimBefore.width = 0
+      scrimAfter.width = 0
+      return
+    }
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    var found = false
+    for (var i = 0; i < b.moduleSlots.length; i++) {
+      var slot = b.moduleSlots[i]
+      if (!slot || slot.region !== "center" || !slot.visible || slot.width <= 0 || slot.height <= 0) continue
+      if (typeof b.slotWindow === "function" && b.slotWindow(slot) !== win) continue
+      var p
+      try {
+        p = slot.mapToItem(win.contentItem, 0, 0)
+      } catch (e) {
+        continue
+      }
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
+      maxX = Math.max(maxX, p.x + slot.width); maxY = Math.max(maxY, p.y + slot.height)
+      found = true
+    }
+    if (!found) {
+      scrimBefore.width = 0
+      scrimAfter.width = 0
+      return
+    }
+    var trayPos
+    try {
+      trayPos = root.mapToItem(win.contentItem, 0, 0)
+    } catch (e) {
+      scrimBefore.width = 0
+      scrimAfter.width = 0
+      return
+    }
+    if (root.vertical) {
+      var cut0 = Math.max(minY, Math.min(maxY, trayPos.y))
+      var cut1 = Math.max(minY, Math.min(maxY, trayPos.y + root.height))
+      scrimBefore.x = minX; scrimBefore.width = maxX - minX
+      scrimBefore.y = minY; scrimBefore.height = Math.max(0, cut0 - minY)
+      scrimAfter.x = minX; scrimAfter.width = maxX - minX
+      scrimAfter.y = cut1; scrimAfter.height = Math.max(0, maxY - cut1)
+    } else {
+      var cx0 = Math.max(minX, Math.min(maxX, trayPos.x))
+      var cx1 = Math.max(minX, Math.min(maxX, trayPos.x + root.width))
+      scrimBefore.y = minY; scrimBefore.height = maxY - minY
+      scrimBefore.x = minX; scrimBefore.width = Math.max(0, cx0 - minX)
+      scrimAfter.y = minY; scrimAfter.height = maxY - minY
+      scrimAfter.x = cx1; scrimAfter.width = Math.max(0, maxX - cx1)
+    }
+  }
+
   // Match Waybar's group/tray-expander drawer transition-duration.
   readonly property int animationDuration: 600
   property real revealProgress: (expanded || dragOver || ownPopoutActive) ? 1 : 0
@@ -107,8 +201,10 @@ BarWidget {
   readonly property bool dragActive: root.bar ? dragEligible(root.bar.barDragSource) : false
   property bool dragOver: false
   property string dragSourceId: ""
-  property string dragSourceRegion: ""
-  property int dragSourceIndex: -1
+  // Insertion pick for a bar widget being dragged in: where among the drawer
+  // content it would land if released right now.
+  property var dragInPick: null
+  property bool markerGuard: false
 
   // Imperative on purpose: the drag-start handler runs inside the very signal
   // dispatch that dirtied the dragActive binding, and reading the binding
@@ -137,6 +233,7 @@ BarWidget {
     var y = root.bar.barDragSceneY
     dragOver = x >= origin.x && x <= origin.x + root.width
       && y >= origin.y && y <= origin.y + root.height
+    dragInPick = dragOver ? drawerReorderPick(Qt.point(x, y), null) : null
   }
 
   Connections {
@@ -150,20 +247,6 @@ BarWidget {
         // drop; every other monitor's copy keeps an empty id and stays inert.
         var eligible = root.dragEligible(slot)
         root.dragSourceId = eligible ? String(slot.moduleName || "") : ""
-        root.dragSourceRegion = String(slot.region || "")
-        // Remember where the widget started so a later Restore can put it
-        // back exactly, even though the bar's own drop may reshuffle it
-        // before the deferred capture runs.
-        root.dragSourceIndex = -1
-        if (eligible && typeof root.bar.layoutEntries === "function") {
-          var entries = root.bar.layoutEntries(root.dragSourceRegion)
-          for (var i = 0; i < entries.length; i++) {
-            if (TrayModel.entryId(entries[i]) === root.dragSourceId) {
-              root.dragSourceIndex = i
-              break
-            }
-          }
-        }
         root.updateDragOver()
         return
       }
@@ -175,21 +258,42 @@ BarWidget {
       // reference and plain values, so it survives this widget's own
       // destruction in the rebuild that the bar's adjacent-slot move causes.
       var wanted = root.dragOver ? root.dragSourceId : ""
-      var from = root.dragSourceRegion
-      var at = root.dragSourceIndex
+      // Land the widget exactly where it was released: build the drawer's
+      // next order from the insertion edge tracked during the drag.
+      var nextOrder = null
+      if (wanted) {
+        var keys = root.drawerEntries.map(function(entry) { return entry.key })
+        var beforeKey = root.dragInPick ? String(root.dragInPick.beforeKey) : ""
+        var insertAt = beforeKey !== "" ? keys.indexOf(beforeKey) : -1
+        if (insertAt < 0) keys.push(wanted)
+        else keys.splice(insertAt, 0, wanted)
+        nextOrder = keys
+      }
       root.dragOver = false
       root.dragSourceId = ""
-      root.dragSourceRegion = ""
-      root.dragSourceIndex = -1
+      root.dragInPick = null
       if (!wanted) return
       var shellRef = root.bar ? root.bar.shell : null
       var trayId = root.moduleName || "io.github.tyrichards.tray"
       if (!shellRef || typeof shellRef.mutateShellConfig !== "function") return
       Qt.callLater(function() {
         shellRef.mutateShellConfig(function(config) {
-          TrayModel.captureIntoTray(config, trayId, wanted, from, at)
+          TrayModel.captureIntoTray(config, trayId, wanted, nextOrder)
         })
       })
+    }
+
+    // The bar recomputes its own drop marker every pointer move; while an
+    // eligible drag hovers the tray, repaint it as the drawer's insertion
+    // edge instead of the bar's adjacent-slot line. The guard stops the
+    // override from re-triggering itself.
+    function onBarDragTargetGeometryChanged() {
+      if (root.markerGuard || !root.dragOver || !root.bar) return
+      root.markerGuard = true
+      root.bar.barDragTargetGeometry = root.dragInPick
+        ? root.bar.dropMarkerRect(root.dragInPick.delegate, root.dragInPick.after)
+        : null
+      root.markerGuard = false
     }
 
     function onBarDragSceneXChanged() { root.updateDragOver() }
