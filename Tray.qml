@@ -643,6 +643,9 @@ BarWidget {
     resetTrayMenu()
     activeTrayItem = item
     activeTrayAnchor = anchorItem
+    // Kill any pending tooltip for the icon under the cursor: with the menu
+    // open, a "Dropbox" bubble popping up over it is pure noise.
+    if (root.bar) root.bar.hideTooltip(anchorItem)
     trayMenuOpen = true
   }
 
@@ -1127,7 +1130,11 @@ BarWidget {
     menu: root.activeTrayItem ? root.activeTrayItem.menu : null
   }
 
-  PopupCard {
+  // KeyboardPanel for the same reasons as the manage popup: an xdg-popup can
+  // never take layer keyboard focus, so Escape could not close the app menu.
+  // The fullscreen overlay also takes the pointer off the bar icon, which is
+  // what used to let a stray tooltip pop up on top of the open menu.
+  KeyboardPanel {
     id: trayMenuPopup
     anchorItem: root.activeTrayAnchor || root
     owner: root
@@ -1139,13 +1146,18 @@ BarWidget {
     // tray item still resets immediately, from openTrayMenu() itself.
     onVisibleChanged: if (!visible) root.resetTrayMenu()
     padding: Style.space(8)
-    borderColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.45)
+    borderSpec: Border.surfaceSpec("popups", "border",
+      Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.45), Math.max(1, Style.space(2)))
     contentWidth: trayMenuPopup.fittedContentWidth(Style.space(232))
     contentHeight: trayMenuPopup.fittedContentHeight(menuHeaderHeight + trayMenuColumn.implicitHeight, Style.space(420))
 
     // Column skips invisible children but keeps reporting their height, so
     // read the header's extent through its own visibility.
     readonly property int menuHeaderHeight: menuHeader.visible ? menuHeader.implicitHeight : 0
+
+    PanelKeyCatcher {
+      anchors.fill: parent
+      onCloseRequested: root.close()
 
     Column {
       id: trayMenuLayout
@@ -1366,6 +1378,7 @@ BarWidget {
         }
       }
     }
+    }
   }
 
   // Renders a tray icon, recoloring symbolic icons to the bar foreground so
@@ -1432,7 +1445,12 @@ BarWidget {
       acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: if (root.bar && trayItemRoot.modelData) root.bar.showTooltip(trayItemRoot, root.trayTooltip(trayItemRoot.modelData))
+      // No tooltips while one of the tray's own popups is up — they would
+      // render on top of the open menu.
+      onEntered: {
+        if (root.trayMenuOpen || root.managePopupOpen) return
+        if (root.bar && trayItemRoot.modelData) root.bar.showTooltip(trayItemRoot, root.trayTooltip(trayItemRoot.modelData))
+      }
       onExited: if (root.bar) root.bar.hideTooltip(trayItemRoot)
       onPressed: function(mouse) {
         if (mouse.button === Qt.RightButton) {
@@ -1458,6 +1476,7 @@ BarWidget {
     }
 
     readonly property bool tooltipHovered: visible && opacity > 0 && mouseArea.containsMouse
+      && !root.trayMenuOpen && !root.managePopupOpen
   }
 
   // A captured bar widget living inside the tray. Instantiates the same
