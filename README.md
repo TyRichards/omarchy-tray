@@ -1,4 +1,9 @@
-# Tray
+```text
+▄
+█▀▀ █▀▀ ▄▀█ █ █
+▀▀  ▀   ▀▀▀ ▀▀█
+by Ty Richards
+```
 
 A better system tray for the [Omarchy](https://omarchy.org/) bar.
 
