@@ -7,6 +7,8 @@ by Ty Richards
 
 A better system tray for the [Omarchy](https://omarchy.org/) bar.
 
+![Drawer, capture, and reorder in action](demo.gif)
+
 Everything the stock `omarchy.tray` does — status notifier icons, pin/hide,
 the slide-out chevron drawer, in-popup app menus with submenu drill-down —
 plus one big upgrade: **drag any bar widget onto the tray and it moves inside
@@ -18,8 +20,6 @@ can be tucked into the tray. Taken to the limit, your bar can be nothing but
 this tray, with everything else sliding out on hover.
 
 ![The tray's drawer and manage popup](preview.png)
-
-![Drawer, capture, and reorder in action](demo.gif)
 
 ## Install
 
