@@ -910,7 +910,10 @@ BarWidget {
   Component { id: hostedWidgetComponent; HostedWidget {} }
   Component { id: trayItemComponent; TrayItem {} }
 
-  PopupCard {
+  // KeyboardPanel rather than PopupCard: an xdg-popup can never take layer
+  // keyboard focus, so Escape could not reach it. This is the same base the
+  // bluetooth/network modals use — Escape closes, click-away dismisses.
+  KeyboardPanel {
     id: managePopup
     anchorItem: root
     owner: root
@@ -922,6 +925,10 @@ BarWidget {
     // Manage-popup row glyphs — swap freely.
     readonly property string iconHiddenGlyph: ""
     readonly property string iconVisibleGlyph: ""
+
+    PanelKeyCatcher {
+      anchors.fill: parent
+      onCloseRequested: root.close()
 
     Column {
       id: manageColumn
@@ -951,44 +958,50 @@ BarWidget {
         foreground: root.foreground
       }
 
-      Item {
+      // The section header row and its icon rows form one tight block,
+      // spaced like the wifi panel's network list (Style.space(4) between
+      // rows); the outer column's looser section rhythm stays above it.
+      Column {
         width: manageColumn.width
-        implicitHeight: Math.max(hideIconsLabel.implicitHeight, hideIconsSwitch.implicitHeight)
+        spacing: Style.space(4)
+
+        Item {
+          width: parent.width
+          implicitHeight: Math.max(hideIconsLabel.implicitHeight, hideIconsSwitch.implicitHeight)
+
+          // Right-justified beside the switch, in the same style as the
+          // wifi panel's "OTHER NETWORKS" section header.
+          PanelSectionHeader {
+            id: hideIconsLabel
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: hideIconsSwitch.left
+            anchors.rightMargin: Style.space(10)
+            text: "SHOW SYSTEM ICONS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          ToggleSwitch {
+            id: hideIconsSwitch
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            checked: root.showTrayIcons
+            foreground: root.foreground
+            onToggled: root.persistState({ showTrayIcons: !root.showTrayIcons })
+          }
+        }
 
         Text {
-          id: hideIconsLabel
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.left: parent.left
-          anchors.right: hideIconsSwitch.left
-          anchors.rightMargin: Style.space(10)
-          text: "Show System Icons"
-          color: root.foreground
+          visible: root.allItems.length === 0
+          text: "No system tray icons reporting."
+          color: Qt.darker(root.foreground, 1.5)
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
-          elide: Text.ElideRight
+          font.italic: true
         }
 
-        ToggleSwitch {
-          id: hideIconsSwitch
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.right: parent.right
-          checked: root.showTrayIcons
-          foreground: root.foreground
-          onToggled: root.persistState({ showTrayIcons: !root.showTrayIcons })
-        }
-      }
-
-      Text {
-        visible: root.allItems.length === 0
-        text: "No system tray icons reporting."
-        color: Qt.darker(root.foreground, 1.5)
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        font.italic: true
-      }
-
-      Repeater {
-        model: root.allItems
+        Repeater {
+          model: root.allItems
         // Built like the wifi panel's network rows: a CursorSurface that
         // lights up as one hoverable button, icon at the far left, title,
         // and a status glyph in a fixed slot at the far right. Clicking
@@ -1001,8 +1014,10 @@ BarWidget {
           implicitHeight: rowBody.implicitHeight
           hasCursor: iconRowMouse.containsMouse && root.showTrayIcons
           foreground: root.foreground
-          // Grayed out (and inert) while the master switch hides them all.
-          opacity: root.showTrayIcons ? 1.0 : 0.4
+          // Grayed out while the master switch hides them all (inert too) or
+          // while this icon is individually hidden (still clickable, so it
+          // can be brought back).
+          opacity: !root.showTrayIcons || isHidden ? 0.4 : 1.0
           enabled: root.showTrayIcons
 
           readonly property string itemId: String(modelData.id || "")
@@ -1079,6 +1094,8 @@ BarWidget {
           }
         }
       }
+      }
+    }
     }
   }
 

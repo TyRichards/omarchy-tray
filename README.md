@@ -53,8 +53,8 @@ into the bar's empty middle without pushing its neighbours around.
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.
-- **Right-click the chevron** for the manage popup: a **Show System Icons**
-  master toggle (on by default; the icon rows gray out while icons are
+- **Right-click the chevron** for the manage popup (Escape or click-away
+  closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
   hidden), and one hoverable row per icon — click it to toggle that icon's
   visibility; the eye glyph at the row's edge shows the current state.
   Widgets have no popup controls — dragging is the whole interface.
