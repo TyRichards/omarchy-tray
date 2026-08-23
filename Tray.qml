@@ -910,12 +910,34 @@ BarWidget {
   Component { id: hostedWidgetComponent; HostedWidget {} }
   Component { id: trayItemComponent; TrayItem {} }
 
+  // The popup anchors to a frozen snapshot of the tray's rect rather than
+  // the live widget: toggling icons resizes the drawer, which moves the
+  // tray, and a live anchor would drag the open modal around with it. The
+  // snapshot is parented to the bar window so slot reflow can't move it.
+  Item {
+    id: popupAnchorProxy
+    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    visible: false
+  }
+
+  function snapshotPopupAnchor() {
+    var win = root.QsWindow ? root.QsWindow.window : null
+    if (!win || !win.contentItem) return
+    var p = root.mapToItem(win.contentItem, 0, 0)
+    popupAnchorProxy.x = p.x
+    popupAnchorProxy.y = p.y
+    popupAnchorProxy.width = root.width
+    popupAnchorProxy.height = root.height
+  }
+
+  onManagePopupOpenChanged: if (managePopupOpen) snapshotPopupAnchor()
+
   // KeyboardPanel rather than PopupCard: an xdg-popup can never take layer
   // keyboard focus, so Escape could not reach it. This is the same base the
   // bluetooth/network modals use — Escape closes, click-away dismisses.
   KeyboardPanel {
     id: managePopup
-    anchorItem: root
+    anchorItem: popupAnchorProxy
     owner: root
     bar: root.bar
     open: root.managePopupOpen
@@ -969,25 +991,26 @@ BarWidget {
           width: parent.width
           implicitHeight: Math.max(hideIconsLabel.implicitHeight, hideIconsSwitch.implicitHeight)
 
-          // Right-justified beside the switch, in the same style as the
-          // wifi panel's "OTHER NETWORKS" section header.
-          PanelSectionHeader {
-            id: hideIconsLabel
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: hideIconsSwitch.left
-            anchors.rightMargin: Style.space(10)
-            text: "SHOW SYSTEM ICONS"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-          }
-
+          // Switch first, then the wifi-style all-caps section label.
           ToggleSwitch {
             id: hideIconsSwitch
             anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
+            anchors.left: parent.left
             checked: root.showTrayIcons
             foreground: root.foreground
             onToggled: root.persistState({ showTrayIcons: !root.showTrayIcons })
+          }
+
+          PanelSectionHeader {
+            id: hideIconsLabel
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: hideIconsSwitch.right
+            anchors.leftMargin: Style.space(10)
+            anchors.right: parent.right
+            text: "SHOW SYSTEM ICONS"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            elide: Text.ElideRight
           }
         }
 
