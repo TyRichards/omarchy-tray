@@ -102,17 +102,20 @@ BarWidget {
 
   readonly property bool drawerOut: revealProgress > 0.02
 
-  // On a transparent bar there is no background to dim against — the fence
-  // stands down entirely (no scrim, no backdrop, no click blocking) so the
-  // see-through look stays intact.
+  // The center fence is a vertical-bar concern: there the drawer expands
+  // straight through the center section, so it dims in both bar modes — with
+  // the bar background when opaque, with a translucent dark tint when the
+  // bar is transparent (there is no background to dim against, but the
+  // wallpaper and center glyphs still recede). Horizontal bars leave the
+  // center alone: opaque needs no dimming, and transparent stays pristine.
   readonly property bool barTransparent: root.bar ? root.bar.transparent === true : false
 
   component ScrimBlock: Rectangle {
     parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
     z: 80
-    visible: root.drawerOut && !root.barTransparent && parent !== root && width > 0.5 && height > 0.5
-    color: root.bar ? root.bar.background : Color.background
-    opacity: 0.8 * root.revealProgress
+    visible: root.drawerOut && root.vertical && parent !== root && width > 0.5 && height > 0.5
+    color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
+    opacity: (root.barTransparent ? 0.5 : 0.8) * root.revealProgress
 
     MouseArea {
       anchors.fill: parent
@@ -843,18 +846,18 @@ BarWidget {
   implicitWidth: root.vertical ? root.barSize : trayContent.implicitWidth
   implicitHeight: root.vertical ? trayContent.implicitHeight : root.barSize
 
-  // Opaque backdrop while the drawer is out: the tray paints over other
-  // sections it overruns (center widgets on a vertical bar), but its content
-  // is sparse glyphs — without a solid ground, whatever sits underneath
-  // shows through the gaps un-dimmed. The scrim handles the center content
-  // BESIDE the drawer; this hides what is directly under it. Skipped on a
-  // transparent bar, where painting the background color would undo the
-  // transparency the user chose.
+  // Backdrop while the drawer is out: the tray paints over other sections it
+  // overruns, but its content is sparse glyphs — without a ground, whatever
+  // sits underneath shows through the gaps un-dimmed. The scrim handles the
+  // center content BESIDE the drawer; this covers what is directly under it.
+  // Opaque bars get the solid background; a transparent VERTICAL bar gets
+  // the same dark tint as its scrim (so under-drawer content dims with the
+  // rest of the center); a transparent horizontal bar stays pristine.
   Rectangle {
     anchors.fill: parent
-    visible: root.drawerOut && !root.barTransparent
-    color: root.bar ? root.bar.background : Color.background
-    opacity: root.revealProgress
+    visible: root.drawerOut && (root.vertical || !root.barTransparent)
+    color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
+    opacity: (root.barTransparent ? 0.5 : 1.0) * root.revealProgress
   }
 
   Loader {

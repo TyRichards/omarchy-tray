@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tyrichards.tray",
   "name": "Tray",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "author": "Ty Richards",
   "license": "MIT",
   "description": "A better system tray: everything the stock tray does, plus drag any bar widget into its slide-out drawer.",
