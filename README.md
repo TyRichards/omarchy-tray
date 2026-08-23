@@ -89,9 +89,16 @@ If you replaced the stock tray, put it back with
   actions, and panels. Tray state (what's captured, the drawer order, hidden
   icons) is stored on the tray's own `shell.json` entry, so it survives
   restarts and is shared across monitors.
-- On a vertical bar (or with a very wide drawer on a horizontal one) the open
-  drawer can overrun the bar's center section; while the drawer is out the
-  center widgets are scrimmed and inert so the two never fight.
+## Vertical bars
+
+Everything works the same on a left- or right-edge bar — the drawer slides
+out along the bar, and the same drags capture, reorder, and eject widgets.
+Because a vertical drawer expands straight through the bar's center section,
+the center widgets dim and go inert while the drawer is out (with the bar
+background when the bar is opaque, with a translucent tint when it is
+transparent), so the two never fight for pixels or clicks.
+
+![Vertical bar: drawer, dimmed center, and manage popup](demo-vertical.gif)
 
 ## Notes and limitations
 
