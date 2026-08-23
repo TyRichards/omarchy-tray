@@ -102,10 +102,15 @@ BarWidget {
 
   readonly property bool drawerOut: revealProgress > 0.02
 
+  // On a transparent bar there is no background to dim against — the fence
+  // stands down entirely (no scrim, no backdrop, no click blocking) so the
+  // see-through look stays intact.
+  readonly property bool barTransparent: root.bar ? root.bar.transparent === true : false
+
   component ScrimBlock: Rectangle {
     parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
     z: 80
-    visible: root.drawerOut && parent !== root && width > 0.5 && height > 0.5
+    visible: root.drawerOut && !root.barTransparent && parent !== root && width > 0.5 && height > 0.5
     color: root.bar ? root.bar.background : Color.background
     opacity: 0.8 * root.revealProgress
 
@@ -842,10 +847,12 @@ BarWidget {
   // sections it overruns (center widgets on a vertical bar), but its content
   // is sparse glyphs — without a solid ground, whatever sits underneath
   // shows through the gaps un-dimmed. The scrim handles the center content
-  // BESIDE the drawer; this hides what is directly under it.
+  // BESIDE the drawer; this hides what is directly under it. Skipped on a
+  // transparent bar, where painting the background color would undo the
+  // transparency the user chose.
   Rectangle {
     anchors.fill: parent
-    visible: root.drawerOut
+    visible: root.drawerOut && !root.barTransparent
     color: root.bar ? root.bar.background : Color.background
     opacity: root.revealProgress
   }
