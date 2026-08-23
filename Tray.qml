@@ -838,6 +838,18 @@ BarWidget {
   implicitWidth: root.vertical ? root.barSize : trayContent.implicitWidth
   implicitHeight: root.vertical ? trayContent.implicitHeight : root.barSize
 
+  // Opaque backdrop while the drawer is out: the tray paints over other
+  // sections it overruns (center widgets on a vertical bar), but its content
+  // is sparse glyphs — without a solid ground, whatever sits underneath
+  // shows through the gaps un-dimmed. The scrim handles the center content
+  // BESIDE the drawer; this hides what is directly under it.
+  Rectangle {
+    anchors.fill: parent
+    visible: root.drawerOut
+    color: root.bar ? root.bar.background : Color.background
+    opacity: root.revealProgress
+  }
+
   Loader {
     id: trayContent
     anchors.fill: parent
