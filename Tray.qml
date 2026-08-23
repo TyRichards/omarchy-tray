@@ -30,6 +30,11 @@ BarWidget {
   readonly property bool exteriorPopoutOpen: root.bar && root.bar.activePopout ? !ownPopoutActive : false
   property bool clickExpanded: false
   onExteriorPopoutOpenChanged: if (!exteriorPopoutOpen) clickExpanded = false
+
+  function closeExteriorPopout() {
+    var popout = root.bar ? root.bar.activePopout : null
+    if (popout && popout !== root && typeof popout.close === "function") popout.close()
+  }
   property bool managePopupOpen: false
   property bool trayMenuOpen: false
   property var activeTrayItem: null
@@ -784,7 +789,12 @@ BarWidget {
           text: "\uf053"
           onPressed: function(button) {
             if (button === Qt.RightButton) root.managePopupOpen = !root.managePopupOpen
-            else if (button === Qt.LeftButton) root.clickExpanded = true
+            else if (button === Qt.LeftButton) {
+              // Opening the drawer is also a dismissal gesture for whatever
+              // exterior panel is up.
+              root.closeExteriorPopout()
+              root.clickExpanded = true
+            }
           }
         }
 
@@ -852,7 +862,12 @@ BarWidget {
           textRotation: 90
           onPressed: function(button) {
             if (button === Qt.RightButton) root.managePopupOpen = !root.managePopupOpen
-            else if (button === Qt.LeftButton) root.clickExpanded = true
+            else if (button === Qt.LeftButton) {
+              // Opening the drawer is also a dismissal gesture for whatever
+              // exterior panel is up.
+              root.closeExteriorPopout()
+              root.clickExpanded = true
+            }
           }
         }
 
@@ -904,10 +919,15 @@ BarWidget {
     contentWidth: managePopup.fittedContentWidth(Style.space(320))
     contentHeight: managePopup.fittedContentHeight(manageColumn.implicitHeight)
 
+    // Manage-popup row glyphs — swap freely.
+    readonly property string iconHiddenGlyph: ""
+    readonly property string iconVisibleGlyph: ""
+
     Column {
       id: manageColumn
       anchors.fill: parent
-      spacing: Style.space(8)
+      // Same section rhythm as the bluetooth panel's content column.
+      spacing: Style.space(14)
 
       // Same hero arrangement as the audio panel: display-size glyph, title,
       // and an auto-uppercased letter-spaced caption (PanelHero's meta).
@@ -969,13 +989,19 @@ BarWidget {
 
       Repeater {
         model: root.allItems
-        delegate: Item {
+        // Built like the wifi panel's network rows: a CursorSurface that
+        // lights up as one hoverable button, icon at the far left, title,
+        // and a status glyph in a fixed slot at the far right. Clicking
+        // anywhere on the row toggles the icon's hidden state.
+        delegate: CursorSurface {
           id: rowRoot
           required property var modelData
           required property int index
           width: manageColumn.width
-          implicitHeight: 28
-          // Grayed out (and inert) while the master hide switch is on.
+          implicitHeight: rowBody.implicitHeight
+          hasCursor: iconRowMouse.containsMouse && root.showTrayIcons
+          foreground: root.foreground
+          // Grayed out (and inert) while the master switch hides them all.
           opacity: root.showTrayIcons ? 1.0 : 0.4
           enabled: root.showTrayIcons
 
@@ -991,40 +1017,65 @@ BarWidget {
           }
           readonly property bool isHidden: root.hiddenIds.indexOf(itemId) !== -1
 
-          TrayIcon {
-            id: rowIcon
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            width: 16
-            height: 16
-            icon: rowRoot.modelData.icon
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: rowIcon.right
-            anchors.leftMargin: Style.space(10)
-            anchors.right: rowHideBtn.left
-            anchors.rightMargin: Style.space(8)
-            text: rowRoot.displayName
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            elide: Text.ElideRight
-          }
-
-          Button {
-            id: rowHideBtn
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            iconText: rowRoot.isHidden ? "\udb81\uded1" : "\uf06e"
-            text: rowRoot.isHidden ? "Show" : "Hide"
-            foreground: root.foreground
-            horizontalPadding: 8
-            verticalPadding: 3
-            iconSize: Style.font.bodySmall
-            fontSize: Style.font.bodySmall
+          MouseArea {
+            id: iconRowMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
             onClicked: root.toggleHide(rowRoot.itemId)
+          }
+
+          Item {
+            id: rowBody
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(10)
+            implicitHeight: Math.max(rowIcon.height, rowTitle.implicitHeight, rightGlyph.implicitHeight) + Style.spacing.rowPaddingX
+
+            TrayIcon {
+              id: rowIcon
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.font.title
+              height: Style.font.title
+              icon: rowRoot.modelData.icon
+            }
+
+            Text {
+              id: rowTitle
+              anchors.left: rowIcon.right
+              anchors.leftMargin: Style.space(10)
+              anchors.right: rightGlyph.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: rowRoot.displayName
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              elide: Text.ElideRight
+            }
+
+            Item {
+              id: rightGlyph
+              width: Style.space(22)
+              implicitHeight: rightGlyphText.implicitHeight
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+
+              Text {
+                id: rightGlyphText
+                width: parent.width
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignHCenter
+                text: rowRoot.isHidden ? managePopup.iconHiddenGlyph : managePopup.iconVisibleGlyph
+                color: Qt.darker(root.foreground, 1.4)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.subtitle
+              }
+            }
           }
         }
       }
