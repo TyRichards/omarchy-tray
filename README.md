@@ -42,6 +42,18 @@ For the smoothest reveal animation, keep the tray at the **inner edge** of its
 section (first entry of `right`, or last of `left`): the drawer then expands
 into the bar's empty middle without pushing its neighbours around.
 
+## Uninstall
+
+Drag any widgets you want to keep out of the tray first (or they will be
+restored to the bar layout when you remove their entries by hand), then:
+
+```bash
+omarchy plugin remove io.github.tyrichards.tray
+```
+
+If you replaced the stock tray, put it back with
+`omarchy bar put omarchy.tray --section right --index 0`.
+
 ## Use
 
 - **Hover the chevron** to slide the drawer open; tray icons and captured
