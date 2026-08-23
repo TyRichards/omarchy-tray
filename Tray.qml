@@ -22,7 +22,14 @@ BarWidget {
   // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
   // two stacked hover items (the overlay plus a handler in the drawer) fight
   // over hover and oscillate the reveal, so the overlay is the one authority.
-  property bool expanded: overlayHover.hovered
+  // While another widget's panel is open, its focus grab swallows hover
+  // entirely, so the drawer cannot open by pointing at it — but clicks still
+  // arrive, so a deliberate chevron click holds it open (clickExpanded) until
+  // that panel closes.
+  property bool expanded: clickExpanded || (overlayHover.hovered && !exteriorPopoutOpen)
+  readonly property bool exteriorPopoutOpen: root.bar && root.bar.activePopout ? !ownPopoutActive : false
+  property bool clickExpanded: false
+  onExteriorPopoutOpenChanged: if (!exteriorPopoutOpen) clickExpanded = false
   property bool managePopupOpen: false
   property bool trayMenuOpen: false
   property var activeTrayItem: null
@@ -334,6 +341,7 @@ BarWidget {
     // widgets' own hover styling and tooltips still work underneath.
     HoverHandler {
       id: overlayHover
+      onHoveredChanged: if (!hovered) root.clickExpanded = false
       cursorShape: {
         var slot = dragOutOverlay.parent
         if (root && root.bar && slot !== root && typeof root.bar.moduleClickTargetAt === "function"
@@ -708,6 +716,12 @@ BarWidget {
   // Stay on screen while a drag is in flight even when otherwise empty, so
   // there is always a drop target to aim at.
   visible: hasDrawerContent || hostedWrappers.length > 0 || dragActive
+
+  // When the manage popup is open, the bar underlines the whole tray — from
+  // the chevron's left edge to the last icon — instead of its default 55%
+  // fraction of the slot.
+  readonly property real openPanelIndicatorWidth: width
+  readonly property real openPanelIndicatorHeight: height
   clip: false
   implicitWidth: root.vertical ? root.barSize : trayContent.implicitWidth
   implicitHeight: root.vertical ? trayContent.implicitHeight : root.barSize
@@ -770,6 +784,7 @@ BarWidget {
           text: "\uf053"
           onPressed: function(button) {
             if (button === Qt.RightButton) root.managePopupOpen = !root.managePopupOpen
+            else if (button === Qt.LeftButton) root.clickExpanded = true
           }
         }
 
@@ -837,6 +852,7 @@ BarWidget {
           textRotation: 90
           onPressed: function(button) {
             if (button === Qt.RightButton) root.managePopupOpen = !root.managePopupOpen
+            else if (button === Qt.LeftButton) root.clickExpanded = true
           }
         }
 
@@ -898,7 +914,7 @@ BarWidget {
       PanelHero {
         width: manageColumn.width
         title: "Tray"
-        meta: "Hide and organize your icons"
+        meta: "Hide & reorder bar icons"
         foreground: root.foreground
         fontFamily: root.fontFamily
         iconComponent: Component {
@@ -906,7 +922,7 @@ BarWidget {
             text: "󱊖"
             color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: Style.font.display
+            font.pixelSize: Math.round(Style.font.display * 1.2)
           }
         }
       }
@@ -925,7 +941,7 @@ BarWidget {
           anchors.left: parent.left
           anchors.right: hideIconsSwitch.left
           anchors.rightMargin: Style.space(10)
-          text: "Hide System Tray Icons"
+          text: "Show System Icons"
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
@@ -936,7 +952,7 @@ BarWidget {
           id: hideIconsSwitch
           anchors.verticalCenter: parent.verticalCenter
           anchors.right: parent.right
-          checked: !root.showTrayIcons
+          checked: root.showTrayIcons
           foreground: root.foreground
           onToggled: root.persistState({ showTrayIcons: !root.showTrayIcons })
         }
@@ -1001,7 +1017,7 @@ BarWidget {
             id: rowHideBtn
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
-            iconText: "\uf06e"
+            iconText: rowRoot.isHidden ? "\udb81\uded1" : "\uf06e"
             text: rowRoot.isHidden ? "Show" : "Hide"
             foreground: root.foreground
             horizontalPadding: 8

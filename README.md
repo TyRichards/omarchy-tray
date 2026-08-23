@@ -53,10 +53,13 @@ into the bar's empty middle without pushing its neighbours around.
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.
-- **Right-click the chevron** for the manage popup: a **Hide System Tray
-  Icons** master toggle (the icon rows gray out while it is on), and a
-  **Hide** switch per icon. Widgets have no popup controls — dragging is
-  the whole interface.
+- **Right-click the chevron** for the manage popup: a **Show System Icons**
+  master toggle (on by default; the icon rows gray out while icons are
+  hidden), and a **Hide** switch per icon. Widgets have no popup controls —
+  dragging is the whole interface.
+- While another widget's panel is open, hovering the chevron does not open
+  the drawer (the panel's focus grab swallows hover anyway) — click the
+  chevron instead, and the drawer holds open until that panel closes.
 - Captured widgets keep their inline settings, clicks, tooltips, wheel
   actions, and panels. Widget state (what's captured, what's pinned) is stored
   on the tray's own `shell.json` entry, so it survives restarts and is shared
