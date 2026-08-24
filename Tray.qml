@@ -775,8 +775,22 @@ BarWidget {
     return name.slice(-9) === "-symbolic"
   }
 
+  // The bar's shared tooltip label currently uses Text.AutoText and does not
+  // expose its textFormat. Wrap escaped application metadata in known-safe
+  // rich text so the host renders the original characters without allowing
+  // the application to inject markup.
+  function escapedTooltipText(value) {
+    var text = String(value || "")
+    if (!text) return ""
+    return "<span>" + text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\r\n|\r|\n/g, "<br>") + "</span>"
+  }
+
   function trayTooltip(item) {
-    return item.tooltipTitle || item.title || item.id || ""
+    return escapedTooltipText(item.tooltipTitle || item.title || item.id || "")
   }
 
   function classifyItem(item) {
@@ -1219,6 +1233,7 @@ BarWidget {
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               text: rowRoot.displayName
+              textFormat: Text.PlainText
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -1328,6 +1343,7 @@ BarWidget {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(10)
             text: root.currentTitle
+            textFormat: Text.PlainText
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1461,6 +1477,7 @@ BarWidget {
                 anchors.right: submenuGlyph.left
                 anchors.rightMargin: Style.space(8)
                 text: menuRow.rowText
+                textFormat: Text.PlainText
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
