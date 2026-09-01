@@ -191,8 +191,12 @@ BarWidget {
     }
   }
 
-  // Match Waybar's group/tray-expander drawer transition-duration.
-  readonly property int animationDuration: 600
+  // Match Waybar's group/tray-expander drawer transition-duration by default,
+  // while allowing a custom duration on the shell.json entry.
+  readonly property int animationDuration: {
+    var configured = Number(settings.animationDuration)
+    return isFinite(configured) && configured >= 0 ? Math.round(configured) : 600
+  }
   property real revealProgress: (expanded || dragOver || ownPopoutActive) ? 1 : 0
 
   Behavior on revealProgress {
