@@ -860,16 +860,27 @@ BarWidget {
   implicitWidth: root.vertical ? root.barSize : trayContent.implicitWidth
   implicitHeight: root.vertical ? trayContent.implicitHeight : root.barSize
 
+  // Island-style bar replacements (e.g. mscurtescu.island-bar) swap the
+  // stock full-height slab for inset rounded pills and expose their geometry
+  // on the bar root (islandInset/islandPad). The pill spans this widget's
+  // whole slot — the island is sized to the row plus its padding — so the
+  // island itself grounds the drawer, and the full-height square backdrop
+  // below would protrude from the pill and square off its rounded cap.
+  readonly property bool islandHost: !!root.bar && typeof root.bar.islandInset === "number"
+
   // Backdrop while the drawer is out: the tray paints over other sections it
   // overruns, but its content is sparse glyphs — without a ground, whatever
   // sits underneath shows through the gaps un-dimmed. The scrim handles the
   // center content BESIDE the drawer; this covers what is directly under it.
   // Opaque bars get the solid background; a transparent VERTICAL bar gets
   // the same dark tint as its scrim (so under-drawer content dims with the
-  // rest of the center); a transparent horizontal bar stays pristine.
+  // rest of the center); a transparent horizontal bar stays pristine. An
+  // opaque island host is skipped: its pill is the ground, exactly as the
+  // stock bar's slab is for the stock tray.
   Rectangle {
     anchors.fill: parent
     visible: root.drawerOut && (root.vertical || !root.barTransparent)
+      && (!root.islandHost || root.barTransparent)
     color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
     opacity: (root.barTransparent ? 0.5 : 1.0) * root.revealProgress
   }
