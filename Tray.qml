@@ -19,6 +19,32 @@ BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
 
+  // Local compatibility for Omarchy 4.0.3: this container needs the bar's
+  // widget registry and drag coordinator, absent from PluginBarApi.
+  // Resolve only our owning slot's host; other plugins keep their facades.
+  function restoreContainerHost() {
+    if (!bar || "barWidgetRegistry" in bar) return
+    // Built-in sibling widgets retain the host. This is an explicit local
+    // trust exception for this tray, not a change to other plugin APIs.
+    var row = parent && parent.parent ? parent.parent.parent : null
+    if (!row) return
+    for (var i = 0; i < row.children.length; i++) {
+      var slot = row.children[i]
+      var candidate = slot.activeItem && slot.activeItem.bar
+      if (candidate && "barWidgetRegistry" in candidate) {
+        bar = candidate
+        return
+      }
+    }
+  }
+  onBarChanged: Qt.callLater(restoreContainerHost)
+  Timer {
+    interval: 250
+    repeat: true
+    running: !!root.bar && !("barWidgetRegistry" in root.bar)
+    onTriggered: root.restoreContainerHost()
+  }
+
   // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
   // two stacked hover items (the overlay plus a handler in the drawer) fight
   // over hover and oscillate the reveal, so the overlay is the one authority.
