@@ -49,6 +49,40 @@ function ownedByOmarchy(item, layout) {
     || (layoutHasWidget(layout, "omarchy.dropbox") && itemNamed(item, "dropbox"))
 }
 
+// Mirrors the bar's own custom-module resolution (BarModel.js). The bar
+// exposes customModuleType/customModuleSource only on the real Bar object;
+// the PluginBarApi facade third-party widgets receive has neither.
+function expandPath(value, home) {
+  var path = String(value || "")
+  if (path === "") return ""
+  if (path.indexOf("~/") === 0) return home + path.substring(1)
+  if (path.indexOf("$HOME/") === 0) return home + path.substring(5)
+  return path
+}
+
+function customModuleSafeName(name) {
+  var value = String(name || "")
+  return value !== "" && value.indexOf("..") === -1 && value[0] !== "/"
+}
+
+function customModuleType(entry) {
+  var settings = entrySettings(entry)
+  var type = String(settings.type || "")
+  if (type) return type
+  if (settings.exec) return "command"
+  if (settings.source) return "qml"
+  return ""
+}
+
+function customModulePath(entry, home, configDir) {
+  var settings = entrySettings(entry)
+  var name = entryId(entry)
+  var source = settings.source ? expandPath(settings.source, home) : ""
+  if (!source && customModuleSafeName(name))
+    source = String(configDir || "") + "/bar/modules/" + String(name) + ".qml"
+  return source
+}
+
 // QML can hand a settings array across property boundaries as a variant-list
 // proxy: typeof "object", instanceof Array, but Array.isArray false and array
 // methods missing. Which form arrives depends on the injection path, so every
@@ -263,6 +297,8 @@ if (typeof module !== "undefined") {
     itemNamed: itemNamed,
     entryId: entryId,
     entrySettings: entrySettings,
+    customModuleType: customModuleType,
+    customModulePath: customModulePath,
     layoutHasWidget: layoutHasWidget,
     ownedByOmarchy: ownedByOmarchy,
     normalizeWrappers: normalizeWrappers,

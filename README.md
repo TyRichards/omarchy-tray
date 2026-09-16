@@ -13,8 +13,14 @@ A better system tray for the [Omarchy](https://omarchy.org/) bar.
 
 Everything the stock `omarchy.tray` does — status notifier icons, pin/hide,
 the slide-out chevron drawer, in-popup app menus with submenu drill-down —
-plus one big upgrade: **drag any bar widget onto the tray and it moves inside
-the drawer.**
+plus one big upgrade: **any bar widget can live inside the drawer.**
+
+> **On Omarchy 4, drag is unavailable.** The shell hands a third-party widget
+> a `PluginBarApi` facade that carries neither the bar's drag surface nor a
+> writable layout, so nothing can be dragged in, reordered across the bar
+> boundary, or ejected. The drawer renders and runs the widgets you list in
+> `shell.json`; put them there by hand. See
+> [issue #9](https://github.com/TyRichards/omarchy-tray/issues/9).
 
 The clock, the workspaces, the menu, weather, network, audio, power, custom
 modules, third-party plugin widgets — anything that lives in the bar layout
@@ -58,8 +64,45 @@ If you replaced the stock tray, put it back with
 
 ## Use
 
-- **Hover the chevron** to slide the drawer open; tray icons and captured
+- **Hover the chevron** to slide the drawer open; tray icons and hosted
   widgets live inside it.
+- **Right-click the chevron** for the manage popup (Escape or click-away
+  closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
+  hidden), and one hoverable row per icon — click it to toggle that icon's
+  visibility; the eye glyph at the row's edge shows the current state.
+  Hosted widgets have no popup controls. Add and remove them in `shell.json`,
+  as shown below, or by drag where the shell allows it.
+- While another widget's panel is open, hovering the chevron does not open
+  the drawer (the panel's focus grab swallows hover anyway) — click the
+  chevron instead: the open panel closes and the drawer opens.
+- Hosted widgets keep their inline settings, clicks, tooltips, wheel
+  actions, and panels. Tray state (what the drawer holds, its order, hidden
+  icons) is stored on the tray's own `shell.json` entry, so it survives
+  restarts and is shared across monitors.
+
+### Filling the drawer by hand
+
+On Omarchy 4 this is the only way, since the shell withholds the drag surface.
+Move a widget's layout entry from its bar section into the tray's `widgets`
+list, and make sure its plugin id is in the top-level `plugins` array so the
+shell keeps loading it. Many ids are there already:
+
+```json
+{
+  "id": "io.github.tyrichards.tray",
+  "widgets": [
+    { "entry": { "id": "omarchy.keyboard-layout" }, "listed": true }
+  ],
+  "order": ["omarchy.keyboard-layout"]
+}
+```
+
+`entry` is the widget's own layout entry, settings and all, so copy it
+verbatim. `order` interleaves hosted widgets and tray icons by id. The shell
+reloads `shell.json` on save.
+
+### With drag, where the shell allows it
+
 - **Drag any bar widget onto the tray** (drag starts after a short move, same
   as reordering the bar). The tray highlights while you are over it and the
   insertion marker shows where the widget will land among the drawer's
@@ -77,23 +120,11 @@ If you replaced the stock tray, put it back with
 - **Drag the chevron to move the whole tray.** The chevron is the tray's only
   whole-widget drag handle; grabbing anything else in the tray never drags
   the tray itself.
-- **Right-click the chevron** for the manage popup (Escape or click-away
-  closes it): a **SHOW SYSTEM ICONS** master toggle (on by default; the icon rows gray out while icons are
-  hidden), and one hoverable row per icon — click it to toggle that icon's
-  visibility; the eye glyph at the row's edge shows the current state.
-  Widgets have no popup controls — dragging is the whole interface.
-- While another widget's panel is open, hovering the chevron does not open
-  the drawer (the panel's focus grab swallows hover anyway) — click the
-  chevron instead: the open panel closes and the drawer opens.
-- Captured widgets keep their inline settings, clicks, tooltips, wheel
-  actions, and panels. Tray state (what's captured, the drawer order, hidden
-  icons) is stored on the tray's own `shell.json` entry, so it survives
-  restarts and is shared across monitors.
 
 ## Vertical bars
 
 Everything works the same on a left- or right-edge bar — the drawer slides
-out along the bar, and the same drags capture, reorder, and eject widgets.
+out along the bar.
 Because a vertical drawer expands straight through the bar's center section,
 the center widgets dim and go inert while the drawer is out (with the bar
 background when the bar is opaque, with a translucent tint when it is
@@ -103,6 +134,18 @@ transparent), so the two never fight for pixels or clicks.
 
 ## Notes and limitations
 
+- The tray declares a `service` entry point. The shell gives a third-party bar
+  widget no widget registry, and the service is the only place it still hands
+  over the widget catalogue the drawer needs. Restart the shell once with
+  `omarchy-restart-shell` after upgrading: `omarchy plugin update` only
+  rescans, and the QML loader can hold a cached listing for a directory it has
+  already read.
+- Drag is gone on a shell that sandboxes plugins, as described at the top. The
+  drawer itself, the manage popup, hide and show, and the hosted widgets all
+  work; only moving widgets by pointer does not.
+- Two kinds of hosted widget stay inert. One that reads its own service
+  through `bar.shell.serviceFor` gets nothing, because only the built-in bar
+  can mint that. One that reads `bar.shell.pluginRegistry` gets nothing either.
 - Panel hotkeys (`omarchy-shell` summon/toggle for e.g. the weather panel)
   only find widgets sitting directly in the bar layout; a widget captured into
   the tray still opens its panel by click, but not by hotkey. Restore it to

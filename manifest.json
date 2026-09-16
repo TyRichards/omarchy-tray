@@ -2,15 +2,17 @@
   "schemaVersion": 1,
   "id": "io.github.tyrichards.tray",
   "name": "Tray",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "author": "Ty Richards",
   "license": "MIT",
-  "description": "A better system tray: everything the stock tray does, plus drag any bar widget into its slide-out drawer.",
+  "description": "A better system tray: everything the stock tray does, plus a slide-out drawer that hosts other bar widgets.",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "service"
   ],
   "entryPoints": {
-    "barWidget": "Tray.qml"
+    "barWidget": "Tray.qml",
+    "service": "service/Service.qml"
   },
   "barWidget": {
     "displayName": "Tray",

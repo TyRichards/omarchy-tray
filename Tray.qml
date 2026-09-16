@@ -12,12 +12,108 @@ import "TrayModel.js" as TrayModel
 // status notifier icons, pin/hide, the slide-out drawer, in-popup app menus —
 // plus: any bar widget (clock, workspaces, weather, menu, panels, custom
 // modules...) can be dragged onto this tray and it moves inside the drawer.
-// Captured widgets keep their settings, clicks, tooltips, and panels; they can
-// be pinned (always visible) or restored to the bar from the right-click
-// manage popup.
+// Hosted widgets keep their settings, clicks, tooltips, and panels, and can
+// be restored to the bar where the shell still allows a drag.
 BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
+
+  // The Omarchy 4 shell hands a third-party bar widget a PluginBarApi facade
+  // instead of the real Bar, and that facade carries no widget registry. So
+  // captured widgets can no longer be instantiated from bar.barWidgetRegistry
+  // and the drawer renders empty. The shell still injects the widget catalogue
+  // into a plugin's service entry point, and a widget may look up its own
+  // plugin's service, so the registry comes back through service/Service.qml.
+  // A real Bar object (older shells, first-party bars) still wins.
+  //
+  // This resolves outside every binding on purpose: serviceFor() builds the
+  // scoped facade on its first call, and creating a QObject while a binding
+  // runs makes QML re-enter that binding and report a loop on the caller.
+  property var widgetRegistry: null
+  property int serviceAttempt: 0
+  property bool registryGaveUp: false
+
+  // The same facade also withholds the bar's drag surface and its config
+  // writer, so every drag path in this widget is dead on a sandboxed shell.
+  // Probe both once and let the drag handlers refuse early: reading a property
+  // the facade never declares returns undefined, and writing one throws.
+  readonly property bool barDragSupported: !!root.bar
+    && typeof root.bar.captureBarDragGhost === "function"
+    && typeof root.bar.clearBarDrag === "function"
+    && "barDragWindow" in root.bar
+  // Layout writes are tested together with the drag surface because both come
+  // from the "bar" capability: mutateShellConfig exists on every facade and
+  // returns false without it, so the function alone proves nothing. Every
+  // caller of this is a drag path, so the pair is the honest test.
+  readonly property bool barConfigWritable: !!root.bar && !!root.bar.shell
+    && typeof root.bar.shell.mutateShellConfig === "function"
+    && root.barDragSupported
+
+  readonly property string homeDir: Quickshell.env("HOME")
+
+  function resolveWidgetRegistry() {
+    if (root.bar && root.bar.barWidgetRegistry) {
+      root.widgetRegistry = root.bar.barWidgetRegistry
+    } else {
+      var shell = root.bar ? root.bar.shell : null
+      var service = shell && typeof shell.serviceFor === "function"
+        ? shell.serviceFor(root.moduleName) : null
+      root.widgetRegistry = service && service.barWidgetRegistry ? service.barWidgetRegistry : null
+    }
+    if (root.widgetRegistry !== null) {
+      root.serviceAttempt = 0
+      root.registryGaveUp = false
+    }
+  }
+
+  // The bar hands the facade a fresh layoutConfig object every time a widget
+  // registers a click target, and the hosted widgets register theirs as they
+  // load. Depending on that identity puts the drawer in a binding loop, so
+  // track the serialised form and republish only on a real content change.
+  property var stableLayoutConfig: null
+  readonly property string layoutConfigKey: root.bar && root.bar.layoutConfig
+    ? JSON.stringify(root.bar.layoutConfig) : ""
+  onLayoutConfigKeyChanged: root.stableLayoutConfig = root.bar ? root.bar.layoutConfig : null
+
+  onBarChanged: root.resolveWidgetRegistry()
+  Component.onCompleted: {
+    root.stableLayoutConfig = root.bar ? root.bar.layoutConfig : null
+    root.resolveWidgetRegistry()
+  }
+
+  // The service can register after the widget, so retry for a bounded while.
+  Timer {
+    interval: 400
+    repeat: true
+    running: root.widgetRegistry === null && root.serviceAttempt < 40
+    onTriggered: {
+      root.serviceAttempt += 1
+      root.resolveWidgetRegistry()
+      if (root.widgetRegistry === null && root.serviceAttempt >= 40 && !root.registryGaveUp) {
+        root.registryGaveUp = true
+        console.warn("tray: no widget registry after 16 seconds."
+          + " The drawer shows its icons but none of its hosted widgets."
+          + " Two known causes. The shell did not load the plugin's service"
+          + " entry point, which one shell restart fixes. Or a replacement bar"
+          + " is active, and it cannot hand a widget its own service.")
+      }
+    }
+  }
+
+  // The facade has no customModuleType/customModuleSource either; fall back
+  // to the same resolution the bar applies (TrayModel mirrors BarModel).
+  function customModuleType(entry) {
+    if (root.bar && typeof root.bar.customModuleType === "function")
+      return String(root.bar.customModuleType(entry) || "")
+    return TrayModel.customModuleType(entry)
+  }
+
+  function customModuleSource(entry) {
+    if (root.bar && typeof root.bar.customModuleSource === "function")
+      return root.bar.customModuleSource(entry)
+    var path = TrayModel.customModulePath(entry, root.homeDir, root.homeDir + "/.config/omarchy")
+    return path ? Util.fileUrl(path) : ""
+  }
 
   // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
   // two stacked hover items (the overlay plus a handler in the drawer) fight
@@ -219,7 +315,7 @@ BarWidget {
   // there can return a stale false. Recomputing from the live properties is
   // always current.
   function dragEligible(slot) {
-    if (!slot || !root.bar) return false
+    if (!slot || !root.bar || !root.barDragSupported) return false
     if (String(slot.moduleName || "") === root.moduleName) return false
     var win = root.QsWindow ? root.QsWindow.window : null
     return !!win && root.bar.barDragWindow === win
@@ -283,11 +379,13 @@ BarWidget {
       if (!wanted) return
       var shellRef = root.bar ? root.bar.shell : null
       var trayId = root.moduleName || "io.github.tyrichards.tray"
-      if (!shellRef || typeof shellRef.mutateShellConfig !== "function") return
+      if (!root.barConfigWritable) return
       Qt.callLater(function() {
-        shellRef.mutateShellConfig(function(config) {
+        var written = shellRef.mutateShellConfig(function(config) {
           TrayModel.captureIntoTray(config, trayId, wanted, nextOrder)
         })
+        if (!written) console.warn("tray: the shell refused the layout write, so"
+          + " capturing " + wanted + " was not saved.")
       })
     }
 
@@ -484,8 +582,7 @@ BarWidget {
       // Order token to insert before when released over the tray ("" = end);
       // null while the pointer is off the tray or nothing can be reordered.
       property var orderBeforeKey: null
-      readonly property bool canReorder: root.bar && root.bar.shell
-        && typeof root.bar.shell.mutateShellConfig === "function"
+      readonly property bool canReorder: root.barConfigWritable
       readonly property real dragThreshold: Style.space(4)
 
       anchors.fill: parent
@@ -500,7 +597,7 @@ BarWidget {
         var b = root.bar
         var win = root.QsWindow ? root.QsWindow.window : null
         var delegate = dragDelegate || dragIconDelegate
-        if (!b || !win || !delegate) return false
+        if (!b || !win || !delegate || !root.barDragSupported) return false
         fakeDragSlot.moduleName = String(delegate.widgetId || delegate.itemId || "")
         fakeDragSlot.activeItem = delegate.activeItem || delegate
         b.barDragWindow = win
@@ -631,10 +728,12 @@ BarWidget {
         // rebuild the bar while this release handler is on the stack. The
         // closure holds only the shell reference and plain values.
         Qt.callLater(function() {
-          if (typeof shellRef.mutateShellConfig !== "function") return
-          shellRef.mutateShellConfig(function(config) {
+          if (!root.barConfigWritable) return
+          var written = shellRef.mutateShellConfig(function(config) {
             TrayModel.dragOutOfTray(config, trayId, widgetId, toRegion, beforeName)
           })
+          if (!written) console.warn("tray: the shell refused the layout write, so"
+            + " restoring " + widgetId + " to the bar was not saved.")
         })
       }
 
@@ -799,8 +898,7 @@ BarWidget {
   }
 
   function ownedByOmarchy(item) {
-    var layout = root.bar && root.bar.layoutConfig ? root.bar.layoutConfig : null
-    return TrayModel.ownedByOmarchy(item, layout)
+    return TrayModel.ownedByOmarchy(item, root.stableLayoutConfig)
   }
 
   function bucket(category) {
@@ -1635,11 +1733,10 @@ BarWidget {
     readonly property var entry: modelData && modelData.entry ? modelData.entry : ({})
     readonly property string widgetId: TrayModel.entryId(entry)
     readonly property var widgetSettings: TrayModel.entrySettings(entry)
-    readonly property string customType: root.bar && typeof root.bar.customModuleType === "function"
-      ? String(root.bar.customModuleType(entry) || "") : ""
+    readonly property string customType: root.customModuleType(entry)
     readonly property var registryComponent: {
       if (customType) return null
-      var registry = root.bar ? root.bar.barWidgetRegistry : null
+      var registry = root.widgetRegistry
       if (!registry) return null
       var revision = registry.revision
       var record = registry.widgets[widgetId]
@@ -1690,8 +1787,7 @@ BarWidget {
     Loader {
       id: qmlLoader
       active: hostedRoot.customType === "qml"
-      source: active && root.bar && typeof root.bar.customModuleSource === "function"
-        ? root.bar.customModuleSource(hostedRoot.entry) : ""
+      source: active ? root.customModuleSource(hostedRoot.entry) : ""
       anchors.fill: parent
       onLoaded: {
         hostedRoot.injectProps()
