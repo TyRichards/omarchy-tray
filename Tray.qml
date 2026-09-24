@@ -255,6 +255,10 @@ BarWidget {
     target: root.bar
     ignoreUnknownSignals: true
 
+    function onLayoutConfigChanged() {
+      Qt.callLater(root.reconcileHostedWithLayout)
+    }
+
     function onBarDragSourceChanged() {
       var slot = root.bar.barDragSource
       if (slot) {
@@ -827,6 +831,36 @@ BarWidget {
     return TrayModel.sortByOrder(result, orderIds)
   }
 
+  // A hosted widget lives in at most one place: this drawer or the bar
+  // layout. Capture and release keep that invariant, but outside writers do
+  // not know about this tray's settings — enabling a plugin whose only
+  // placement is here, or `omarchy bar put`, re-inserts the id into the bar
+  // layout while our wrapper is still hosted (the shell's enable scan reads
+  // bar.layout and plugins[], not this entry), and the widget then renders
+  // twice. The layout wins: drop the wrapper, the same end state as a
+  // drag-out. Also collapses duplicate wrappers for one id, which a capture
+  // racing the shell's config reload can produce.
+  function reconcileHostedWithLayout() {
+    var b = root.bar
+    if (!b || !b.layoutConfig) return
+    var wrappers = TrayModel.normalizeWrappers(settings.widgets)
+    if (wrappers.length === 0) return
+    var next = []
+    var seen = {}
+    var dropped = false
+    for (var i = 0; i < wrappers.length; i++) {
+      var id = TrayModel.wrapperId(wrappers[i])
+      if (!id || TrayModel.layoutHasWidget(b.layoutConfig, id) || seen[id]) {
+        dropped = true
+        continue
+      }
+      seen[id] = true
+      next.push(wrappers[i])
+    }
+    if (!dropped) return
+    persistState({ widgets: next })
+  }
+
   // Writes the widget's full inline state. updateEntryInline replaces the
   // whole layout entry, so every persisted key has to ride along on every
   // write or a toggle would silently drop the captured widgets. Keys from
@@ -857,6 +891,8 @@ BarWidget {
   // Stay on screen while a drag is in flight even when otherwise empty, so
   // there is always a drop target to aim at.
   visible: hasDrawerContent || hostedWrappers.length > 0 || dragActive
+
+  onSettingsChanged: Qt.callLater(root.reconcileHostedWithLayout)
 
   // When the manage popup is open, the bar underlines the whole tray — from
   // the chevron's left edge to the last icon — instead of its default 55%
