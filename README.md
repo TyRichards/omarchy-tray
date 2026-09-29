@@ -90,6 +90,21 @@ If you replaced the stock tray, put it back with
   icons) is stored on the tray's own `shell.json` entry, so it survives
   restarts and is shared across monitors.
 
+## Drawer below the bar
+
+On a horizontal bar the drawer can open as a strip hanging off the bar
+instead of widening inside it, so it never slides over the widgets beside
+the tray. Right-click the chevron and turn on **OPEN DRAWER BELOW BAR**
+(**ABOVE** on a bottom bar), or set `"dropdown": true` on the tray's
+`shell.json` entry.
+
+The strip starts under the chevron and runs along the bar. Hover the chevron
+to open it and move down into it; it closes shortly after the pointer leaves
+both. Everything else works the same: tray icons and captured widgets keep
+their clicks, menus, tooltips and panels (which open just past the strip),
+and dragging into, out of and around the drawer works across the bar and the
+strip. Vertical bars ignore the setting.
+
 ## Vertical bars
 
 Everything works the same on a left- or right-edge bar — the drawer slides

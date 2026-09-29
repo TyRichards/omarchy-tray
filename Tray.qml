@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
@@ -33,10 +34,90 @@ BarWidget {
   // entirely, so the drawer cannot open by pointing at it — but clicks still
   // arrive, so a deliberate chevron click holds it open (clickExpanded) until
   // that panel closes.
-  property bool expanded: clickExpanded || (overlayHover.hovered && !exteriorPopoutOpen)
+  //
+  // In dropdown mode the pointer crosses from the chevron (bar window) into
+  // the dropdown strip (its own window), so hover from either counts, and a
+  // short grace period bridges the hop between the two surfaces.
+  property bool expanded: clickExpanded || (hoverHeld && !exteriorPopoutOpen)
   readonly property bool exteriorPopoutOpen: root.bar && root.bar.activePopout ? !ownPopoutActive : false
   property bool clickExpanded: false
   onExteriorPopoutOpenChanged: if (!exteriorPopoutOpen) clickExpanded = false
+
+  readonly property bool pointerOnTray: overlayHover.hovered || (dropdownMode && dropdownHover.hovered)
+  property bool hoverHeld: false
+  onPointerOnTrayChanged: {
+    if (pointerOnTray) {
+      hoverGrace.stop()
+      hoverHeld = true
+    } else if (dropdownMode) {
+      hoverGrace.restart()
+    } else {
+      hoverHeld = false
+    }
+  }
+  onHoverHeldChanged: if (!hoverHeld && dropdownMode) clickExpanded = false
+
+  Timer {
+    id: hoverGrace
+    interval: 300
+    onTriggered: root.hoverHeld = root.pointerOnTray
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dropdown mode (settings.dropdown, horizontal bars only). Instead of
+  // widening inside the bar — where it slides over whatever sits beside the
+  // tray — the drawer opens as a strip hanging off the bar's edge, starting
+  // under the chevron and running along the bar, like a second row of the
+  // bar. The strip is its own layer surface, full screen width and covering
+  // the bar strip plus one row, with input masked to the visible strip. Being
+  // full width and anchored to the same edge as the bar, its scene
+  // coordinates line up with the bar's (exactly on a top bar, shifted by a
+  // constant on a bottom bar — see dropdownSceneShift), which keeps the
+  // drag-and-drop math and the host panels' placement working unchanged.
+  // ---------------------------------------------------------------------------
+
+  readonly property bool dropdownMode: settings.dropdown === true && !root.vertical
+  readonly property bool dropdownBelow: !root.bar || root.bar.position !== "bottom"
+  readonly property real dropdownMargin: Style.space(8)
+  readonly property real dropdownPadding: Style.space(6)
+  // Chevron's left edge along the bar, refreshed while the strip is out (the
+  // widgets beside the tray resize on their own, e.g. a clock).
+  property real dropdownAnchorX: 0
+
+  // Offset that maps the dropdown window's scene onto the bar window's. Both
+  // span the screen width, so only the perpendicular axis can differ.
+  readonly property real dropdownSceneShift: dropdownBelow ? 0 : -(dropdownWindow.height - root.barSize)
+
+  function inDropdownWindow(item) {
+    return !!item && !!item.QsWindow && item.QsWindow.window === dropdownWindow
+  }
+
+  // Item point in bar-window scene coordinates, whichever window it is in.
+  function scenePoint(item, x, y) {
+    var p = item.mapToItem(null, x || 0, y || 0)
+    if (inDropdownWindow(item)) return Qt.point(p.x, p.y + dropdownSceneShift)
+    return p
+  }
+
+  function updateDropdownAnchor() {
+    try {
+      dropdownAnchorX = root.mapToItem(null, 0, 0).x
+    } catch (e) {
+    }
+  }
+
+  Timer {
+    running: root.dropdownMode && root.drawerOut
+    interval: 120
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.updateDropdownAnchor()
+  }
+
+  // The drag area currently dragging a drawer entry (the bar overlay's or
+  // the dropdown strip's), or null.
+  property var activeDragArea: null
+  readonly property bool drawerDragging: activeDragArea !== null && activeDragArea.dragging
 
   function closeExteriorPopout() {
     var popout = root.bar ? root.bar.activePopout : null
@@ -200,7 +281,9 @@ BarWidget {
 
   // Match Waybar's group/tray-expander drawer transition-duration.
   readonly property int animationDuration: 600
-  property real revealProgress: (expanded || dragOver || ownPopoutActive) ? 1 : 0
+  // A drag out of the dropdown strip holds it open: the dragged delegate
+  // lives there, and the strip is where a reorder lands.
+  property real revealProgress: (expanded || dragOver || ownPopoutActive || (dropdownMode && drawerDragging)) ? 1 : 0
 
   Behavior on revealProgress {
     NumberAnimation { duration: root.animationDuration; easing.type: Easing.OutCubic }
@@ -270,7 +353,7 @@ BarWidget {
 
   function sceneRect(item) {
     try {
-      var p = item.mapToItem(null, 0, 0)
+      var p = root.scenePoint(item, 0, 0)
       return { x: p.x, y: p.y, width: item.width, height: item.height }
     } catch (e) {
       return null
@@ -280,6 +363,12 @@ BarWidget {
   function containsScene(item, point) {
     var r = sceneRect(item)
     return !!r && point.x >= r.x && point.x <= r.x + r.width && point.y >= r.y && point.y <= r.y + r.height
+  }
+
+  // Over the tray: the widget itself, or the dropdown strip while it is out.
+  function overTray(point) {
+    if (containsScene(root, point)) return true
+    return dropdownMode && drawerOut && dropdownWindow.visible && containsScene(dropdownStrip, point)
   }
 
   // Nearest insertion edge among visible bar slots, as a layout position:
@@ -321,10 +410,22 @@ BarWidget {
   }
 
   // Drop marker and drag ghost, parented to the bar window so they draw
-  // above every section. Coordinates are scene coordinates.
+  // above every section. Coordinates are scene coordinates. In dropdown mode
+  // they live in the dropdown window instead, which covers the bar strip too,
+  // so one marker and ghost can point at bar slots and strip entries alike.
+  readonly property var dragVisualsParent: dropdownMode
+    ? dropdownWindow.contentItem
+    : (root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root)
+
+  // Bar-scene y to the drag visuals' parent.
+  function visualY(y) {
+    return dropdownMode ? y - dropdownSceneShift : y
+  }
+
   function showMarker(item, after) {
     var r = item ? sceneRect(item) : null
     if (!r) { dropMarker.visible = false; return }
+    r.y = visualY(r.y)
     var t = Style.spacing.xs
     if (root.vertical) {
       dropMarker.x = r.x; dropMarker.width = r.width
@@ -338,7 +439,7 @@ BarWidget {
 
   Rectangle {
     id: dropMarker
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    parent: root.dragVisualsParent
     visible: false
     z: 300
     color: Color.accent
@@ -360,7 +461,7 @@ BarWidget {
     dragGhost.offsetY = offsetY
     if (!item || typeof item.grabToImage !== "function") return
     item.grabToImage(function(result) {
-      if (!dragOutMouse.dragging || !result) return
+      if (!root.drawerDragging || !result) return
       dragGhost.source = result.url
       dragGhost.visible = true
     })
@@ -387,8 +488,8 @@ BarWidget {
   function trackDragIn() {
     var pointer = dragInPointer
     if (!pointer) return
-    var point = pointer.mapToItem(null, pointer.mouseX, pointer.mouseY)
-    dragOver = containsScene(root, point)
+    var point = root.scenePoint(pointer, pointer.mouseX, pointer.mouseY)
+    dragOver = overTray(point)
     dragInPick = dragOver ? drawerReorderPick(point, null) : null
     if (dragOver) showMarker(dragInPick ? dragInPick.delegate : null, dragInPick ? dragInPick.after : false)
     else dropMarker.visible = false
@@ -444,7 +545,7 @@ BarWidget {
     repeat: true
     running: root.visible && root.canDrag
     triggeredOnStart: true
-    onTriggered: if (!root.dragInPointer && !dragOutMouse.dragging) root.refreshSlots()
+    onTriggered: if (!root.dragInPointer && !root.drawerDragging) root.refreshSlots()
   }
 
   Connections {
@@ -503,7 +604,7 @@ BarWidget {
       if (!d || d === dragged || !d.visible || d.width <= 0 || d.height <= 0) continue
       var origin
       try {
-        origin = d.mapToItem(null, 0, 0)
+        origin = root.scenePoint(d, 0, 0)
       } catch (e) {
         continue
       }
@@ -537,8 +638,8 @@ BarWidget {
     return { delegate: bestDelegate, after: bestAfter, beforeKey: beforeKey }
   }
 
-  function hostedDelegateAt(rootX, rootY) {
-    return delegateAt(hostedDelegates, rootX, rootY)
+  function hostedDelegateAt(scenePoint) {
+    return delegateAt(hostedDelegates, scenePoint)
   }
 
   // Live TrayItem delegates (status-notifier icons), for hit-testing and
@@ -557,21 +658,17 @@ BarWidget {
     trayIconDelegates = trayIconDelegates.filter(function(d) { return d !== item })
   }
 
-  function trayIconDelegateAt(rootX, rootY) {
-    return delegateAt(trayIconDelegates, rootX, rootY)
+  function trayIconDelegateAt(scenePoint) {
+    return delegateAt(trayIconDelegates, scenePoint)
   }
 
-  function delegateAt(delegates, rootX, rootY) {
+  // Hit-test in bar-scene coordinates, so delegates in the bar and in the
+  // dropdown strip resolve the same way.
+  function delegateAt(delegates, scenePoint) {
     for (var i = 0; i < delegates.length; i++) {
       var d = delegates[i]
       if (!d || !d.visible || d.width <= 0 || d.height <= 0) continue
-      var p
-      try {
-        p = root.mapToItem(d, rootX, rootY)
-      } catch (e) {
-        continue
-      }
-      if (p.x >= 0 && p.x <= d.width && p.y >= 0 && p.y <= d.height) return d
+      if (containsScene(d, scenePoint)) return d
     }
     return null
   }
@@ -597,7 +694,7 @@ BarWidget {
     // widgets' own hover styling and tooltips still work underneath.
     HoverHandler {
       id: overlayHover
-      onHoveredChanged: if (!hovered) root.clickExpanded = false
+      onHoveredChanged: if (!hovered && !root.dropdownMode) root.clickExpanded = false
       cursorShape: {
         var slot = dragOutOverlay.parent
         if (root && root.bar && slot !== root && typeof root.bar.moduleClickTargetAt === "function"
@@ -609,149 +706,180 @@ BarWidget {
       }
     }
 
-    MouseArea {
+    DrawerDragArea {
       id: dragOutMouse
-
-      property bool dragging: false
-      property bool suppressClick: false
-      property real pressedX: 0
-      property real pressedY: 0
-      property var dragDelegate: null
-      // A status-notifier icon being dragged. Icons reorder within the tray
-      // only; releasing outside the tray is a deliberate no-op.
-      property var dragIconDelegate: null
-      // Order token to insert before when released over the tray ("" = end);
-      // null while the pointer is off the tray or nothing can be reordered.
-      property var orderBeforeKey: null
-      // Bar position to release a hosted widget into, from root.barDropAt().
-      property var barDrop: null
-      readonly property real dragThreshold: Style.space(4)
-
       anchors.fill: parent
-      acceptedButtons: Qt.LeftButton
-      propagateComposedEvents: true
+    }
+  }
 
-      function rootPoint(mouse) {
-        return dragOutMouse.mapToItem(root, mouse.x, mouse.y)
+  // A delegate is going away: drop it from any drag area still holding it.
+  function forgetDragDelegate(item) {
+    var areas = [dragOutMouse, dropdownMouse]
+    for (var i = 0; i < areas.length; i++) {
+      var a = areas[i]
+      if (!a) continue
+      if (a.dragDelegate === item) a.dragDelegate = null
+      if (a.dragIconDelegate === item) a.dragIconDelegate = null
+    }
+  }
+
+  // Press-and-drag handling for drawer content, shared by the bar overlay
+  // above and the dropdown strip. Dragging a hosted widget or tray icon
+  // shows our own ghost and drop marker; releasing over the tray reorders,
+  // releasing over the bar moves the widget's entry back into the bar
+  // layout at that position. A plain click is handed on untouched.
+  component DrawerDragArea: MouseArea {
+    id: dragArea
+
+    // True for the dropdown strip's instance. There the drawer entries sit
+    // directly beneath (no bar slot MouseArea in between), so clicks simply
+    // propagate to them, and there is no chevron zone to leave alone.
+    property bool inDropdown: false
+    property bool dragging: false
+    property bool suppressClick: false
+    property real pressedX: 0
+    property real pressedY: 0
+    property var dragDelegate: null
+    // A status-notifier icon being dragged. Icons reorder within the tray
+    // only; releasing outside the tray is a deliberate no-op.
+    property var dragIconDelegate: null
+    // Order token to insert before when released over the tray ("" = end);
+    // null while the pointer is off the tray or nothing can be reordered.
+    property var orderBeforeKey: null
+    // Bar position to release a hosted widget into, from root.barDropAt().
+    property var barDrop: null
+    readonly property real dragThreshold: Style.space(4)
+
+    acceptedButtons: Qt.LeftButton
+    propagateComposedEvents: true
+
+    function beginDragOut(mouse) {
+      var delegate = dragDelegate || dragIconDelegate
+      if (!delegate) return false
+      var local = dragArea.mapToItem(delegate, mouse.x, mouse.y)
+      root.refreshSlots()
+      root.activeDragArea = dragArea
+      root.startGhost(delegate.activeItem || delegate, local.x, local.y)
+      return true
+    }
+
+    function updateDragOut(mouse) {
+      var scenePoint = root.scenePoint(dragArea, mouse.x, mouse.y)
+      dragGhost.x = scenePoint.x - dragGhost.offsetX
+      dragGhost.y = root.visualY(scenePoint.y) - dragGhost.offsetY
+      var dragged = dragDelegate || dragIconDelegate
+      orderBeforeKey = null
+      barDrop = null
+
+      // Over the tray the release reorders — widgets and icons share one
+      // order, so a single pick covers both kinds.
+      if (root.overTray(scenePoint)) {
+        var pick = root.drawerReorderPick(scenePoint, dragged)
+        orderBeforeKey = pick ? pick.beforeKey : null
+        root.showMarker(pick ? pick.delegate : null, pick ? pick.after : false)
+        return
       }
 
-      function beginDragOut(mouse) {
-        var delegate = dragDelegate || dragIconDelegate
-        if (!delegate) return false
-        var local = dragOutMouse.mapToItem(delegate, mouse.x, mouse.y)
-        root.refreshSlots()
-        root.startGhost(delegate.activeItem || delegate, local.x, local.y)
-        return true
-      }
+      // Status-notifier icons only ever move inside the tray: outside it
+      // there is no drop target and the release is a no-op.
+      barDrop = dragDelegate ? root.barDropAt(scenePoint) : null
+      root.showMarker(barDrop ? barDrop.slot : null, barDrop ? barDrop.after : false)
+    }
 
-      function updateDragOut(mouse) {
-        var scenePoint = dragOutMouse.mapToItem(null, mouse.x, mouse.y)
-        dragGhost.x = scenePoint.x - dragGhost.offsetX
-        dragGhost.y = scenePoint.y - dragGhost.offsetY
-        var dragged = dragDelegate || dragIconDelegate
-        orderBeforeKey = null
-        barDrop = null
-
-        // Over the tray the release reorders — widgets and icons share one
-        // order, so a single pick covers both kinds.
-        if (root.containsScene(root, scenePoint)) {
-          var pick = root.drawerReorderPick(scenePoint, dragged)
-          orderBeforeKey = pick ? pick.beforeKey : null
-          root.showMarker(pick ? pick.delegate : null, pick ? pick.after : false)
-          return
-        }
-
-        // Status-notifier icons only ever move inside the tray: outside it
-        // there is no drop target and the release is a no-op.
-        barDrop = dragDelegate ? root.barDropAt(scenePoint) : null
-        root.showMarker(barDrop ? barDrop.slot : null, barDrop ? barDrop.after : false)
-      }
-
-      onPressed: function(mouse) {
-        dragging = false
-        suppressClick = false
-        var p = rootPoint(mouse)
+    onPressed: function(mouse) {
+      dragging = false
+      suppressClick = false
+      if (!inDropdown) {
         // Chevron zone: refuse the press so it falls through to the slot's
         // own MouseArea — dragging the chevron moves the whole tray.
+        var p = dragArea.mapToItem(root, mouse.x, mouse.y)
         var main = root.vertical ? p.y : p.x
         if (root.chevronExtent > 0 && main < root.chevronExtent) {
           mouse.accepted = false
           return
         }
-        pressedX = mouse.x
-        pressedY = mouse.y
-        dragDelegate = root.hostedDelegateAt(p.x, p.y)
-        dragIconDelegate = dragDelegate ? null : root.trayIconDelegateAt(p.x, p.y)
+      }
+      pressedX = mouse.x
+      pressedY = mouse.y
+      var scenePoint = root.scenePoint(dragArea, mouse.x, mouse.y)
+      dragDelegate = root.hostedDelegateAt(scenePoint)
+      dragIconDelegate = dragDelegate ? null : root.trayIconDelegateAt(scenePoint)
+    }
+
+    onPositionChanged: function(mouse) {
+      if (!root.canDrag || !(dragDelegate || dragIconDelegate) || !(mouse.buttons & Qt.LeftButton)) return
+
+      var distance = Math.abs(mouse.x - pressedX) + Math.abs(mouse.y - pressedY)
+      if (!dragging && distance >= dragThreshold) {
+        if (!beginDragOut(mouse)) return
+        dragging = true
+        if (root.bar) root.bar.hideTooltip(root)
+        root.hideDropdownTooltip(null)
+      }
+      if (dragging) updateDragOut(mouse)
+    }
+
+    onReleased: function(mouse) {
+      var wasDragging = dragging
+      dragging = false
+      if (!wasDragging) return
+
+      suppressClick = true
+      mouse.accepted = true
+      var dragged = dragDelegate || dragIconDelegate
+      var widgetId = dragged ? String(dragged.widgetId || dragged.itemId || "") : ""
+      var reorder = orderBeforeKey
+      var drop = barDrop
+      resetDrag()
+      if (!widgetId) return
+
+      // Released over the tray: rearrange the shared order (widgets and
+      // icons alike). A settings-only write, so no bar rebuild occurs;
+      // deferring just keeps the release handler off the write path.
+      if (reorder !== null && reorder !== undefined) {
+        var keys = root.drawerEntries.map(function(entry) { return entry.key })
+        var nextOrder = TrayModel.movedBefore(keys, widgetId, String(reorder))
+        if (nextOrder) Qt.callLater(function() { root.persistState({ order: nextOrder }) })
+        return
       }
 
-      onPositionChanged: function(mouse) {
-        if (!root.canDrag || !(dragDelegate || dragIconDelegate) || !(mouse.buttons & Qt.LeftButton)) return
+      if (drop && root.trayService)
+        root.trayService.release(root.moduleName, widgetId, drop.region, drop.beforeName)
+    }
 
-        var distance = Math.abs(mouse.x - pressedX) + Math.abs(mouse.y - pressedY)
-        if (!dragging && distance >= dragThreshold) {
-          if (!beginDragOut(mouse)) return
-          dragging = true
-          if (root.bar) root.bar.hideTooltip(root)
-        }
-        if (dragging) updateDragOut(mouse)
-      }
+    function resetDrag() {
+      orderBeforeKey = null
+      barDrop = null
+      dragDelegate = null
+      dragIconDelegate = null
+      if (root.activeDragArea === dragArea) root.activeDragArea = null
+      root.endDragVisuals()
+    }
 
-      onReleased: function(mouse) {
-        var wasDragging = dragging
-        dragging = false
-        if (!wasDragging) return
+    onCanceled: {
+      dragging = false
+      suppressClick = false
+      resetDrag()
+    }
 
-        suppressClick = true
-        mouse.accepted = true
-        var dragged = dragDelegate || dragIconDelegate
-        var widgetId = dragged ? String(dragged.widgetId || dragged.itemId || "") : ""
-        var reorder = orderBeforeKey
-        var drop = barDrop
-        resetDrag()
-        if (!widgetId) return
-
-        // Released over the tray: rearrange the shared order (widgets and
-        // icons alike). A settings-only write, so no bar rebuild occurs;
-        // deferring just keeps the release handler off the write path.
-        if (reorder !== null && reorder !== undefined) {
-          var keys = root.drawerEntries.map(function(entry) { return entry.key })
-          var nextOrder = TrayModel.movedBefore(keys, widgetId, String(reorder))
-          if (nextOrder) Qt.callLater(function() { root.persistState({ order: nextOrder }) })
-          return
-        }
-
-        if (drop && root.trayService)
-          root.trayService.release(root.moduleName, widgetId, drop.region, drop.beforeName)
-      }
-
-      function resetDrag() {
-        orderBeforeKey = null
-        barDrop = null
-        dragDelegate = null
-        dragIconDelegate = null
-        root.endDragVisuals()
-      }
-
-      onCanceled: {
-        dragging = false
+    onClicked: function(mouse) {
+      if (suppressClick) {
         suppressClick = false
-        resetDrag()
+        mouse.accepted = true
+        return
       }
-
-      onClicked: function(mouse) {
-        if (suppressClick) {
-          suppressClick = false
-          mouse.accepted = true
-          return
-        }
-        // Mirror the slot MouseArea's click routing so hosted widgets and
-        // tray icons behave exactly as before: registered click targets get
-        // triggerPress, everything else sees the composed click propagate.
-        var slot = dragOutOverlay.parent
-        if (slot === root || !root.bar || typeof root.bar.pressModuleClickTarget !== "function"
-            || !root.bar.pressModuleClickTarget(slot, mouse.button, dragOutOverlay.x + mouse.x, dragOutOverlay.y + mouse.y))
-          mouse.accepted = false
+      if (inDropdown) {
+        // The entry under the pointer has its own MouseArea; hand it the click.
+        mouse.accepted = false
+        return
       }
+      // Mirror the slot MouseArea's click routing so hosted widgets and
+      // tray icons behave exactly as before: registered click targets get
+      // triggerPress, everything else sees the composed click propagate.
+      var slot = dragOutOverlay.parent
+      if (slot === root || !root.bar || typeof root.bar.pressModuleClickTarget !== "function"
+          || !root.bar.pressModuleClickTarget(slot, mouse.button, dragOutOverlay.x + mouse.x, dragOutOverlay.y + mouse.y))
+        mouse.accepted = false
     }
   }
 
@@ -959,7 +1087,7 @@ BarWidget {
   // rest of the center); a transparent horizontal bar stays pristine.
   Rectangle {
     anchors.fill: parent
-    visible: root.drawerOut && (root.vertical || !root.barTransparent)
+    visible: root.drawerOut && !root.dropdownMode && (root.vertical || !root.barTransparent)
     color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
     opacity: (root.barTransparent ? 0.5 : 1.0) * root.revealProgress
   }
@@ -992,7 +1120,7 @@ BarWidget {
       // measures. The widget grows only while revealed rather than reserving
       // the expanded width — with whole widgets inside, a permanent reserved
       // gap could hollow out most of the bar.
-      readonly property real drawerExtent: drawerRow.implicitWidth
+      readonly property real drawerExtent: root.dropdownMode ? 0 : drawerRow.implicitWidth
       readonly property real revealExtent: drawerExtent * root.revealProgress
       readonly property real drawerBlockWidth: expandIcon.implicitWidth + revealExtent
 
@@ -1046,8 +1174,9 @@ BarWidget {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 0
 
+            // Empty in dropdown mode: the entries live in the dropdown strip.
             Repeater {
-              model: root.drawerEntries
+              model: root.dropdownMode ? [] : root.drawerEntries
               delegate: DrawerEntry {}
             }
           }
@@ -1120,6 +1249,246 @@ BarWidget {
             }
           }
         }
+      }
+    }
+  }
+
+  // The dropdown strip's surface: see "Dropdown mode" above. Mapped only
+  // while the drawer is out; its entries stay instantiated while unmapped,
+  // exactly as the inline drawer keeps them alive while collapsed.
+  PanelWindow {
+    id: dropdownWindow
+
+    readonly property var barWindow: root.QsWindow ? root.QsWindow.window : null
+
+    screen: barWindow ? barWindow.screen : null
+    visible: root.dropdownMode && root.drawerOut && barWindow !== null
+    color: "transparent"
+    surfaceFormat.opaque: false
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-tray-dropdown"
+    WlrLayershell.layer: WlrLayer.Top
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+    anchors {
+      top: root.dropdownBelow
+      bottom: !root.dropdownBelow
+      left: true
+      right: true
+    }
+
+    // The bar strip plus one bar-tall row. Host panels anchored to an entry
+    // in here read this height as the bar's and open just past the strip.
+    implicitHeight: root.barSize * 2
+
+    // Only the strip takes input; the bar strip underneath stays the bar's.
+    mask: Region { item: dropdownClip }
+
+    Item {
+      id: dropdownClip
+      x: Math.max(root.dropdownMargin,
+        Math.min(root.dropdownAnchorX, dropdownWindow.width - width - root.dropdownMargin))
+      y: root.dropdownBelow ? root.barSize : 0
+      width: dropdownStrip.width
+      height: dropdownStrip.height
+      clip: true
+
+      // Slides out from under the bar edge.
+      Item {
+        id: dropdownStrip
+        width: dropdownRow.implicitWidth + root.dropdownPadding * 2
+        height: root.barSize
+        y: (root.dropdownBelow ? -height : height) * (1 - root.revealProgress)
+        opacity: Math.min(1, root.revealProgress * 1.5)
+
+        // Square where it meets the bar, rounded at the far edge.
+        Rectangle {
+          anchors.fill: parent
+          radius: Style.cornerRadius
+          color: root.bar ? root.bar.background : Color.background
+          border.width: 1
+          border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+        }
+
+        Rectangle {
+          x: 1
+          width: parent.width - 2
+          height: Math.min(parent.height / 2, Style.cornerRadius + 1)
+          y: root.dropdownBelow ? 0 : parent.height - height
+          color: root.bar ? root.bar.background : Color.background
+        }
+
+        HoverHandler {
+          id: dropdownHover
+        }
+
+        Row {
+          id: dropdownRow
+          x: root.dropdownPadding
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 0
+
+          Repeater {
+            model: root.dropdownMode ? root.drawerEntries : []
+            delegate: DrawerEntry {}
+          }
+        }
+
+        DrawerDragArea {
+          id: dropdownMouse
+          inDropdown: true
+          anchors.fill: parent
+          z: 10
+        }
+      }
+    }
+  }
+
+  // Tooltips in the dropdown strip. The bar only shows tooltips for targets
+  // in its own window, so the tray relays tooltip requests for strip entries
+  // (its own icons and hosted widgets both go through the tray's bar facade)
+  // to a bubble of its own, styled and timed like the bar's.
+  property var dropdownTooltipTarget: null
+  property string dropdownTooltipText: ""
+  property bool dropdownTooltipShown: false
+  property var hostShowTooltip: null
+  property var hostHideTooltip: null
+  property var tooltipRelayBar: null
+
+  function tooltipTargetHovered(target) {
+    return !!target && target.visible !== false && target.opacity !== 0 && target.tooltipHovered === true
+  }
+
+  // The bubble renders plain text only (no markup from applications). The
+  // tray's own icons send escapedTooltipText()'s safe rich text for the bar's
+  // label; unwrap that back to the original characters.
+  function plainTooltipText(text) {
+    var t = String(text || "")
+    var m = /^<span>([\s\S]*)<\/span>$/.exec(t)
+    if (!m) return t
+    return m[1].replace(/<br>/g, "\n").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+  }
+
+  function showDropdownTooltip(target, text) {
+    dropdownTooltipShown = false
+    dropdownTooltipTarget = target
+    dropdownTooltipText = plainTooltipText(text)
+    if (!dropdownTooltipText) return
+    dropdownTooltipDelay.restart()
+  }
+
+  function hideDropdownTooltip(target) {
+    if (target && target !== dropdownTooltipTarget) return
+    dropdownTooltipDelay.stop()
+    dropdownTooltipShown = false
+    dropdownTooltipTarget = null
+    dropdownTooltipText = ""
+  }
+
+  Timer {
+    id: dropdownTooltipDelay
+    interval: 400
+    onTriggered: {
+      // Checked late: tooltipHovered can trail the enter that asked for it.
+      if (root.tooltipTargetHovered(root.dropdownTooltipTarget)) root.dropdownTooltipShown = true
+      else root.hideDropdownTooltip(null)
+    }
+  }
+
+  Timer {
+    interval: 100
+    repeat: true
+    running: root.dropdownTooltipShown
+    onTriggered: if (!root.tooltipTargetHovered(root.dropdownTooltipTarget)) root.hideDropdownTooltip(null)
+  }
+
+  // Wraps the facade's tooltip callbacks (Omarchy 4's PluginBarApi); a host
+  // without them keeps its own tooltips and the strip simply shows none.
+  function installTooltipRelay() {
+    var b = root.bar
+    if (b === tooltipRelayBar) return
+    removeTooltipRelay()
+    if (!b || typeof b._showTooltip !== "function" || typeof b._hideTooltip !== "function") return
+    hostShowTooltip = b._showTooltip
+    hostHideTooltip = b._hideTooltip
+    b._showTooltip = function(target, text) {
+      if (root.inDropdownWindow(target)) {
+        root.showDropdownTooltip(target, text)
+        return
+      }
+      root.hideDropdownTooltip(null)
+      root.hostShowTooltip(target, text)
+    }
+    b._hideTooltip = function(target) {
+      root.hideDropdownTooltip(target)
+      root.hostHideTooltip(target)
+    }
+    tooltipRelayBar = b
+  }
+
+  function removeTooltipRelay() {
+    var b = tooltipRelayBar
+    if (b && hostShowTooltip && hostHideTooltip) {
+      b._showTooltip = hostShowTooltip
+      b._hideTooltip = hostHideTooltip
+    }
+    tooltipRelayBar = null
+    hostShowTooltip = null
+    hostHideTooltip = null
+  }
+
+  onBarChanged: installTooltipRelay()
+  Component.onCompleted: installTooltipRelay()
+  Component.onDestruction: removeTooltipRelay()
+
+  PopupWindow {
+    id: dropdownTooltipWindow
+
+    visible: root.dropdownTooltipShown && root.dropdownTooltipTarget !== null
+      && root.dropdownTooltipText !== "" && dropdownWindow.visible
+    color: "transparent"
+    implicitWidth: Math.ceil(dropdownTooltipBubble.implicitWidth)
+    implicitHeight: Math.ceil(dropdownTooltipBubble.implicitHeight)
+
+    anchor {
+      id: dropdownTooltipAnchor
+      window: dropdownWindow
+      adjustment: PopupAdjustment.Slide
+      edges: Edges.Top | Edges.Left
+      gravity: Edges.Bottom | Edges.Right
+      rect.width: 1
+      rect.height: 1
+
+      onAnchoring: {
+        var target = root.dropdownTooltipTarget
+        if (!root.inDropdownWindow(target)) return
+        var w = dropdownTooltipWindow.implicitWidth
+        var h = dropdownTooltipWindow.implicitHeight
+        var localY = root.dropdownBelow ? target.height + 6 : -h - 6
+        var point = dropdownWindow.contentItem.mapFromItem(target, target.width / 2 - w / 2, localY)
+        dropdownTooltipAnchor.rect.x = Math.round(point.x)
+        dropdownTooltipAnchor.rect.y = Math.round(point.y)
+      }
+    }
+
+    BorderSurface {
+      id: dropdownTooltipBubble
+      implicitWidth: dropdownTooltipLabel.implicitWidth + 20
+      implicitHeight: dropdownTooltipLabel.implicitHeight + 14
+      color: Color.tooltip.background
+      borderSpec: Border.surfaceSpec("tooltip", "border", Color.tooltip.border, 1)
+      radius: Style.cornerRadius
+
+      Text {
+        id: dropdownTooltipLabel
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        text: root.dropdownTooltipText
+        color: Color.tooltip.text
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
       }
     }
   }
@@ -1207,6 +1576,35 @@ BarWidget {
 
       PanelSeparator {
         foreground: root.foreground
+      }
+
+      // Where the drawer opens: inside the bar (default) or as a strip
+      // hanging off the bar's edge. Horizontal bars only.
+      Item {
+        visible: !root.vertical
+        width: manageColumn.width
+        implicitHeight: Math.max(dropdownLabel.implicitHeight, dropdownSwitch.implicitHeight)
+
+        ToggleSwitch {
+          id: dropdownSwitch
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.left: parent.left
+          checked: root.dropdownMode
+          foreground: root.foreground
+          onToggled: root.persistState({ dropdown: !root.dropdownMode })
+        }
+
+        PanelSectionHeader {
+          id: dropdownLabel
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.left: dropdownSwitch.right
+          anchors.leftMargin: Style.space(10)
+          anchors.right: parent.right
+          text: root.dropdownBelow ? "OPEN DRAWER BELOW BAR" : "OPEN DRAWER ABOVE BAR"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          elide: Text.ElideRight
+        }
       }
 
       // The section header row and its icon rows form one tight block,
@@ -1655,7 +2053,7 @@ BarWidget {
     Component.onDestruction: {
       // A plugin rescan can destroy the tray before its icon delegates.
       if (root) root.unregisterTrayIconDelegate(trayItemRoot)
-      if (dragOutMouse && dragOutMouse.dragIconDelegate === trayItemRoot) dragOutMouse.dragIconDelegate = null
+      if (root) root.forgetDragDelegate(trayItemRoot)
     }
 
     function displayMenu(mouse) {
@@ -1748,7 +2146,7 @@ BarWidget {
     Component.onDestruction: {
       // A plugin rescan can destroy the tray before its hosted delegates.
       if (root) root.unregisterHostedDelegate(hostedRoot)
-      if (dragOutMouse && dragOutMouse.dragDelegate === hostedRoot) dragOutMouse.dragDelegate = null
+      if (root) root.forgetDragDelegate(hostedRoot)
     }
 
     onActiveItemChanged: Qt.callLater(injectProps)
