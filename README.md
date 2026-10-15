@@ -97,12 +97,14 @@ out along the bar, and the same drags capture, reorder, and eject widgets.
 Because a vertical drawer expands straight through the bar's center section,
 the center widgets dim and go inert while the drawer is out (with the bar
 background when the bar is opaque, with a translucent tint when it is
-transparent), so the two never fight for pixels or clicks.
+clear or glassy), so the two never fight for pixels or clicks.
 
 ![Vertical bar: drawer, dimmed center, and manage popup](demo-vertical.gif)
 
 ## Notes and limitations
 
+- If an update still shows the old drawer background, run
+  `omarchy restart shell` to reload the plugin.
 - Panel hotkeys (`omarchy-shell` summon/toggle for e.g. the weather panel)
   only find widgets sitting directly in the bar layout; a widget captured into
   the tray still opens its panel by click, but not by hotkey. Restore it to
