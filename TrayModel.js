@@ -158,11 +158,18 @@ function captureIntoTray(config, trayId, sourceId, orderTokens) {
     tray.entries[tray.index] = trayEntry
   }
   if (!Array.isArray(trayEntry.widgets)) trayEntry.widgets = []
-  var entry = typeof source.entry === "string" ? { id: source.entry } : source.entry
-  var wrapper = { entry: entry }
   // Keep the plugin loaded while its only reference is inside the tray.
-  if (ensurePluginListed(config, sourceId)) wrapper.listed = true
-  trayEntry.widgets.push(wrapper)
+  var justListed = ensurePluginListed(config, sourceId)
+  var alreadyHosted = false
+  for (var w = 0; w < trayEntry.widgets.length; w++) {
+    if (wrapperId(trayEntry.widgets[w]) === sourceId) { alreadyHosted = true; break }
+  }
+  if (!alreadyHosted) {
+    var entry = typeof source.entry === "string" ? { id: source.entry } : source.entry
+    var wrapper = { entry: entry }
+    if (justListed) wrapper.listed = true
+    trayEntry.widgets.push(wrapper)
+  }
   if (Array.isArray(orderTokens) && orderTokens.length) trayEntry.order = orderTokens.map(String)
   return true
 }

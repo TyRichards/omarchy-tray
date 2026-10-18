@@ -66,6 +66,29 @@ BarWidget {
   // shell.json entry so they survive restarts and sync across monitors.
   readonly property var hostedWrappers: TrayModel.normalizeWrappers(settings.widgets)
 
+  // Re-applies ensurePluginListed() outside drag-in, since any other edit to widgets[] can strand a captured widget unloaded.
+  property var _reconciledPluginIds: ({})
+  function reconcileHostedPlugins() {
+    var pending = []
+    for (var i = 0; i < hostedWrappers.length; i++) {
+      var id = TrayModel.wrapperId(hostedWrappers[i])
+      if (id && !_reconciledPluginIds[id] && pending.indexOf(id) === -1) pending.push(id)
+    }
+    if (!pending.length) return
+    // mutateShellConfig() always persists, so mark ids reconciled before calling it to avoid looping on our own write.
+    var shellRef = root.bar ? root.bar.shell : null
+    if (!shellRef || typeof shellRef.mutateShellConfig !== "function") return
+    var marked = {}
+    for (var key in _reconciledPluginIds) marked[key] = true
+    for (var j = 0; j < pending.length; j++) marked[pending[j]] = true
+    _reconciledPluginIds = marked
+    shellRef.mutateShellConfig(function(config) {
+      for (var k = 0; k < pending.length; k++) TrayModel.ensurePluginListed(config, pending[k])
+    })
+  }
+  onHostedWrappersChanged: Qt.callLater(reconcileHostedPlugins)
+  Component.onCompleted: Qt.callLater(reconcileHostedPlugins)
+
   // The drawer's single mixed model: hosted widgets and tray icons in one
   // ordered sequence.
   readonly property var drawerEntries: {
