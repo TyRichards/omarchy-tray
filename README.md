@@ -40,9 +40,34 @@ By hand: in `~/.config/omarchy/shell.json`, change the bar layout entry
 `{ "id": "omarchy.tray" }` to `{ "id": "io.github.tyrichards.tray" }`.
 The shell hot-reloads on save.
 
-For the smoothest reveal animation, keep the tray at the **inner edge** of its
-section (first entry of `right`, or last of `left`): the drawer then expands
-into the bar's empty middle without pushing its neighbours around.
+## Customization
+
+The tray stores its preferences on its own bar entry in
+`~/.config/omarchy/shell.json`:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `animationDuration` | `600` | Drawer animation duration in milliseconds; set to `0` to disable the animation |
+| `showTrayIcons` | `true` | Whether system tray icons are shown |
+| `hidden` | `[]` | System tray icon IDs hidden from the drawer |
+| `widgets` | `[]` | Bar widgets captured inside the drawer |
+| `order` | `[]` | Shared order of captured widgets and system tray icons |
+
+`showTrayIcons` and `hidden` are managed from the chevron's right-click menu;
+`widgets` and `order` are managed by dragging items. Normally only
+`animationDuration` needs to be edited by hand:
+
+```json
+{
+  "id": "io.github.tyrichards.tray",
+  "animationDuration": 250
+}
+```
+
+The tray itself can be repositioned by dragging its chevron. For the smoothest
+reveal, keep it at the **inner edge** of its section (first entry of `right`,
+or last of `left`): the drawer then expands into the bar's empty middle without
+pushing its neighbours around.
 
 ## Uninstall
 
