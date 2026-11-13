@@ -578,19 +578,43 @@ BarWidget {
 
   Item {
     id: dragOutOverlay
-    // The slot stacks its own drag MouseArea above every widget it loads, so
-    // an overlay that must win the press has to live beside it in the slot,
-    // not inside this widget. Our root fills the slot, so root coordinates
-    // are slot coordinates. Covers the whole widget; presses in the chevron
-    // zone are rejected below so they fall through to the slot's MouseArea,
-    // making the chevron the tray's only whole-widget drag handle.
-    parent: root.parent && root.parent.parent ? root.parent.parent : root
+    // The slot's own drag MouseArea (modulePointer, Bar.qml) fills the whole
+    // slot and is DESIGNED to sit over the widget and take its press ("so the
+    // widget never sees itself held"). It is a direct child of the slot, while
+    // this widget lives nested inside holder -> host, so an overlay parented
+    // to the host can never win the press no matter its z: z only orders
+    // siblings, and modulePointer (later child, z 0) sits above holder (z 0).
+    // The overlay must therefore be a SIBLING of modulePointer, i.e. a direct
+    // child of the slot itself (host.owner). With z 60 it then sits above
+    // modulePointer (z 0) and finally receives presses. The holder is centred
+    // in the slot, so root is not always at (0,0) in slot coordinates: the
+    // sync timer below keeps x/y on root's live position in the slot.
+    // Covers the whole widget; presses in the chevron zone are rejected below
+    // so they fall through to the slot's MouseArea, making the chevron the
+    // tray's only whole-widget drag handle.
+    parent: (root.parent && root.parent.parent && root.parent.parent.owner) ? root.parent.parent.owner : root
     z: 60
     visible: root.visible && parent !== root
     x: 0
     y: 0
     width: root.width
     height: root.height
+
+    // Keep x/y on root's live position in the slot (the holder is centred, so
+    // root moves inside the slot while the drawer animates and while the slot
+    // grows for a drag spacer). Same 100ms cadence as the centre scrim.
+    Timer {
+      interval: 100
+      repeat: true
+      running: dragOutOverlay.visible && dragOutOverlay.parent !== root
+      onTriggered: {
+        try {
+          var sp = root.mapToItem(dragOutOverlay.parent, 0, 0)
+          dragOutOverlay.x = sp.x
+          dragOutOverlay.y = sp.y
+        } catch (e) { }
+      }
+    }
 
     // The single hover authority for the tray (drives root.expanded) and the
     // pointing-hand cursor over clickable content. Non-blocking, so hosted
