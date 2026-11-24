@@ -117,8 +117,20 @@ BarWidget {
   // center alone: opaque needs no dimming, and transparent stays pristine.
   readonly property bool barTransparent: root.bar ? root.bar.transparent === true : false
 
+  // Parent of the scrims, drop marker, drag ghost and popup anchor: the bar
+  // window's content item. Apply it one event-loop turn after a window change,
+  // never synchronously: quickshell moves its content item into a new window on
+  // hide/show (monitor hotplug), and Qt's refWindow child walk (6.12, dev) then refs
+  // items moved in by a binding twice. They keep a pointer to the deleted
+  // window and the shell segfaults when the tray is destroyed.
+  readonly property Item overlayTarget: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+  property Item overlayParent: root
+  function applyOverlayParent() { root.overlayParent = root.overlayTarget }
+  onOverlayTargetChanged: Qt.callLater(root.applyOverlayParent)
+  Component.onCompleted: Qt.callLater(root.applyOverlayParent)
+
   component ScrimBlock: Rectangle {
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    parent: root.overlayParent
     z: 80
     visible: root.drawerOut && root.vertical && parent !== root && width > 0.5 && height > 0.5
     color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
@@ -338,7 +350,7 @@ BarWidget {
 
   Rectangle {
     id: dropMarker
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    parent: root.overlayParent
     visible: false
     z: 300
     color: Color.accent
@@ -1145,7 +1157,7 @@ BarWidget {
   // snapshot is parented to the bar window so slot reflow can't move it.
   Item {
     id: popupAnchorProxy
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
+    parent: root.overlayParent
     visible: false
   }
 
