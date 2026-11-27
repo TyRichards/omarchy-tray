@@ -117,10 +117,15 @@ BarWidget {
   // center alone: opaque needs no dimming, and transparent stays pristine.
   readonly property bool barTransparent: root.bar ? root.bar.transparent === true : false
 
+  // Kept inside this widget, positioned in its coordinates and drawn past its
+  // edges, rather than reparented into the bar window's content item. An item
+  // this widget owns but the bar window holds can outlive that window: when a
+  // monitor is unplugged the bar window goes first and the tray after it, and
+  // destroying the tray then touched the freed window and crashed the shell
+  // (SIGSEGV in QQuickItemPrivate::derefWindow).
   component ScrimBlock: Rectangle {
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
     z: 80
-    visible: root.drawerOut && root.vertical && parent !== root && width > 0.5 && height > 0.5
+    visible: root.drawerOut && root.vertical && width > 0.5 && height > 0.5
     color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
     opacity: (root.barTransparent ? 0.5 : 0.8) * root.revealProgress
 
@@ -160,7 +165,7 @@ BarWidget {
       if (typeof b.slotWindow === "function" && b.slotWindow(slot) !== win) continue
       var p
       try {
-        p = slot.mapToItem(win.contentItem, 0, 0)
+        p = slot.mapToItem(root, 0, 0)
       } catch (e) {
         continue
       }
@@ -173,14 +178,8 @@ BarWidget {
       scrimAfter.width = 0
       return
     }
-    var trayPos
-    try {
-      trayPos = root.mapToItem(win.contentItem, 0, 0)
-    } catch (e) {
-      scrimBefore.width = 0
-      scrimAfter.width = 0
-      return
-    }
+    // The scrims are this widget's children, so the tray sits at their origin.
+    var trayPos = Qt.point(0, 0)
     if (root.vertical) {
       var cut0 = Math.max(minY, Math.min(maxY, trayPos.y))
       var cut1 = Math.max(minY, Math.min(maxY, trayPos.y + root.height))
@@ -1141,20 +1140,34 @@ BarWidget {
 
   // The popup anchors to a frozen snapshot of the tray's rect rather than
   // the live widget: toggling icons resizes the drawer, which moves the
-  // tray, and a live anchor would drag the open modal around with it. The
-  // snapshot is parented to the bar window so slot reflow can't move it.
+  // tray, and a live anchor would drag the open modal around with it.
+  // The snapshot stays a child of the tray (see ScrimBlock for why it is not
+  // reparented into the bar window) and holds still by moving against the
+  // tray: its offset is where the tray was when the popup opened, less where
+  // the tray is now, both in the bar window's coordinates.
+  TransformWatcher {
+    id: trayWatcher
+    a: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : null
+    b: root
+  }
+  readonly property point trayWindowPos: {
+    trayWatcher.transform  // reactive dependency; mapToItem alone is one-shot
+    var win = root.QsWindow ? root.QsWindow.window : null
+    return win && win.contentItem ? root.mapToItem(win.contentItem, 0, 0) : Qt.point(0, 0)
+  }
+  property point popupAnchorSnap: Qt.point(0, 0)
+
   Item {
     id: popupAnchorProxy
-    parent: root.QsWindow && root.QsWindow.window ? root.QsWindow.window.contentItem : root
     visible: false
+    x: root.popupAnchorSnap.x - root.trayWindowPos.x
+    y: root.popupAnchorSnap.y - root.trayWindowPos.y
   }
 
   function snapshotPopupAnchor() {
     var win = root.QsWindow ? root.QsWindow.window : null
     if (!win || !win.contentItem) return
-    var p = root.mapToItem(win.contentItem, 0, 0)
-    popupAnchorProxy.x = p.x
-    popupAnchorProxy.y = p.y
+    popupAnchorSnap = root.mapToItem(win.contentItem, 0, 0)
     popupAnchorProxy.width = root.width
     popupAnchorProxy.height = root.height
   }
